@@ -1,4 +1,4 @@
-export function evaluateGate({ reviews, ci = [], requiredCiContexts = [] }) {
+export function evaluateGate({ reviews, ci = [], requiredCiContexts = [], requiredCiAppIds = {} }) {
   const providerStates = ['openai', 'claude'].map((provider) => {
     const review = reviews?.[provider] ?? null;
     if (!review) return { provider, state: 'pending', reason: 'review missing' };
@@ -12,6 +12,14 @@ export function evaluateGate({ reviews, ci = [], requiredCiContexts = [] }) {
   const ciStates = requiredCiContexts.map((context) => {
     const item = latestByContext.get(context);
     if (!item) return { context, state: 'pending', reason: 'missing' };
+    const expectedAppId = requiredCiAppIds[context] ?? null;
+    if (expectedAppId !== null && Number(item.appId) !== Number(expectedAppId)) {
+      return {
+        context,
+        state: 'failure',
+        reason: `app identity mismatch: expected ${expectedAppId}, received ${item.appId ?? 'none'}`,
+      };
+    }
     if (['queued', 'in_progress', 'pending', 'requested', 'waiting', 'expected'].includes(item.state)) {
       return { context, state: 'pending', reason: item.state };
     }
