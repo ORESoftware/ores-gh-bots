@@ -3,7 +3,7 @@ name: Bootstrap monorepo source
 on:
   push:
     paths:
-      - '.bootstrap/source.part-*'
+      - '.bootstrap-parts/source.part-*'
   workflow_dispatch:
 
 permissions:
@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          parts=(.bootstrap/source.part-*)
+          parts=(.bootstrap-parts/source.part-*)
           if [[ ${#parts[@]} -ne 13 ]]; then
             echo "Waiting for all thirteen source parts; found ${#parts[@]}."
             exit 0
