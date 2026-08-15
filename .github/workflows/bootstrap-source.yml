@@ -28,8 +28,8 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           parts=(.bootstrap/source.part-*)
-          if [[ ${#parts[@]} -ne 3 ]]; then
-            echo "Waiting for all three source parts; found ${#parts[@]}."
+          if [[ ${#parts[@]} -ne 13 ]]; then
+            echo "Waiting for all thirteen source parts; found ${#parts[@]}."
             exit 0
           fi
           cat "${parts[@]}" | base64 --decode > /tmp/ores-gh-bots-source.tar.gz
