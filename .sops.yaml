@@ -1,0 +1,4 @@
+creation_rules:
+  - path_regex: env/enc/.*\.(yaml|json|env)$
+    age: >-
+      age1replacewithyourdeploymentrecipient000000000000000000000000000000000000000
