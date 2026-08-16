@@ -16,28 +16,36 @@ A private GitHub App can only be installed on the account that owns it. The four
 
 ## Manifest bootstrap
 
-1. Enter the repository tool shell with `nix develop`.
-2. Create a registration form for each role. The orchestrator requires the deployed HTTPS base URL:
+1. Enter the repository tool shell with `nix develop`. Keep shell tracing disabled for all registration and conversion commands.
+2. Create a registration form and a separate private callback-state record for each role. The orchestrator requires the deployed HTTPS base URL:
 
    ```sh
-   just app-form orchestrator ORESoftware https://bots.example.internal /tmp/orchestrator.html
-   just app-form openai ORESoftware https://bots.example.internal /tmp/openai.html
-   just app-form claude ORESoftware https://bots.example.internal /tmp/claude.html
-   just app-form gate ORESoftware https://bots.example.internal /tmp/gate.html
-   just app-form actions ORESoftware https://bots.example.internal /tmp/actions.html
+   just app-form orchestrator ORESoftware https://bots.example.internal /tmp/orchestrator.html /tmp/orchestrator.state.json
+   just app-form openai ORESoftware https://bots.example.internal /tmp/openai.html /tmp/openai.state.json
+   just app-form claude ORESoftware https://bots.example.internal /tmp/claude.html /tmp/claude.state.json
+   just app-form gate ORESoftware https://bots.example.internal /tmp/gate.html /tmp/gate.state.json
+   just app-form actions ORESoftware https://bots.example.internal /tmp/actions.html /tmp/actions.state.json
    ```
 
-3. Open each local form, inspect the permissions GitHub displays, and create the App. Preserve the generated `state` and verify it on the callback.
-4. Within one hour, exchange each callback `code`:
+   Both files are written with mode `0600`. The random state is stored only in the state record and is not printed.
+3. Open each local form, inspect the permissions GitHub displays, and create the App. GitHub redirects to the configured callback with one-time `code` and `state` query values.
+4. Within one hour, read the callback values into environment variables without placing either value in shell history, then exchange them against the private state record:
 
    ```sh
-   just app-convert orchestrator CALLBACK_CODE
+   read -rsp 'GitHub manifest code: ' GITHUB_MANIFEST_CODE; printf '\n'
+   export GITHUB_MANIFEST_CODE
+   read -rsp 'GitHub callback state: ' GITHUB_MANIFEST_STATE; printf '\n'
+   export GITHUB_MANIFEST_STATE
+
+   just app-convert orchestrator /tmp/orchestrator.state.json
+
+   unset GITHUB_MANIFEST_CODE GITHUB_MANIFEST_STATE
    ```
 
-   Repeat for `openai`, `claude`, `gate`, and `actions`. The helper writes mode-`0600` dotenv fragments under ignored `env/dec/registrations/` and never prints private keys or webhook secrets.
-5. Copy the fragments into `env/dec/review-bots.env`, add the OpenAI and Anthropic provider credentials, then follow `env/README.md` to validate and encrypt the runtime secret.
+   Repeat for `openai`, `claude`, `gate`, and `actions` with the corresponding state file. The converter rejects callback-state mismatches and expired state records before contacting GitHub. It also rejects `--code` and `--state`, supports mode-`0600` `--code-file` and `--callback-state-file` inputs for non-interactive operators, and deletes the state record only after a successful conversion.
+5. The helper writes mode-`0600` dotenv fragments under ignored `env/dec/registrations/` without printing private keys, webhook secrets, callback state, or conversion codes. Copy the fragments into `env/dec/review-bots.env`, add the OpenAI and Anthropic provider credentials, then follow `env/README.md` to validate and encrypt the runtime secret.
 
-The conversion endpoint may use `GITHUB_MANIFEST_TOKEN` from the process environment when your GitHub policy requires authentication. Never pass a token as a command-line argument.
+The conversion endpoint may use `GITHUB_MANIFEST_TOKEN` from the process environment when your GitHub policy requires authentication. Never pass a token, one-time code, or callback state as a command-line argument.
 
 ## Installation inventory
 
