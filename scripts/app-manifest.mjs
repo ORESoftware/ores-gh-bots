@@ -1,12 +1,14 @@
-import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { chmod, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadPolicyDocuments } from './lib/github-app-policy.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+const modulePath = fileURLToPath(import.meta.url);
+const defaultStateMaxAgeMs = 2 * 60 * 60 * 1_000;
 
-function parseOptions(argv) {
+export function parseOptions(argv) {
   const command = argv[0];
   const options = {};
   for (let index = 1; index < argv.length; index += 1) {
@@ -15,6 +17,7 @@ function parseOptions(argv) {
     const key = flag.slice(2);
     const value = argv[index + 1];
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${flag}`);
+    if (Object.hasOwn(options, key)) throw new Error(`Duplicate option: ${flag}`);
     options[key] = value;
     index += 1;
   }
@@ -50,11 +53,25 @@ function withRuntimeUrls(manifest, baseUrl) {
   return result;
 }
 
-async function createForm(options) {
+async function writePrivateFile(path, content) {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await writeFile(path, content, { mode: 0o600 });
+  await chmod(path, 0o600);
+}
+
+export async function createForm(options, {
+  now = () => new Date(),
+  randomBytesImpl = randomBytes,
+  log = console.log,
+  loadDocuments = loadPolicyDocuments,
+} = {}) {
   const role = requireOption(options, 'role');
   const owner = requireOption(options, 'owner');
   const output = resolve(options.output ?? `/tmp/ores-gh-app-${role}.html`);
-  const documents = await loadPolicyDocuments(root);
+  const stateFile = resolve(options['state-file'] ?? `${output}.state.json`);
+  if (output === stateFile) throw new Error('--output and --state-file must be different paths');
+
+  const documents = await loadDocuments(root);
   const manifest = documents.manifests[role];
   if (!manifest) throw new Error(`Unknown App role: ${role}`);
   const prepared = withRuntimeUrls(manifest, options['base-url'] ?? 'https://replace.example');
@@ -62,7 +79,7 @@ async function createForm(options) {
     throw new Error('The orchestrator form requires --base-url for its webhook and redirect URLs');
   }
 
-  const state = randomBytes(32).toString('hex');
+  const state = randomBytesImpl(32).toString('hex');
   const action = registrationAction(owner, state);
   const manifestJson = JSON.stringify(prepared);
   const html = `<!doctype html>
@@ -82,10 +99,17 @@ async function createForm(options) {
 </body>
 </html>
 `;
-  await mkdir(dirname(output), { recursive: true });
-  await writeFile(output, html, { mode: 0o600 });
-  await chmod(output, 0o600);
-  console.log(JSON.stringify({ role, owner, output, state }, null, 2));
+  const stateRecord = {
+    version: 1,
+    role,
+    owner,
+    state,
+    createdAt: now().toISOString(),
+  };
+
+  await writePrivateFile(output, html);
+  await writePrivateFile(stateFile, `${JSON.stringify(stateRecord, null, 2)}\n`);
+  log(JSON.stringify({ role, owner, output, stateFile }, null, 2));
 }
 
 const credentialMap = {
@@ -116,27 +140,95 @@ function dotenvValue(value) {
   return String(value).replace(/\r?\n/gu, '\\n');
 }
 
-async function convertManifest(options) {
+async function readSecretInput(options, { fileOption, envName, label, env = process.env }) {
+  const file = options[fileOption];
+  const envValue = env[envName];
+  if (file && envValue) throw new Error(`Set only one of ${envName} or --${fileOption}`);
+  const value = file ? await readFile(resolve(file), 'utf8') : envValue;
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`Set ${envName} or pass --${fileOption} with the ${label}`);
+  }
+  return value.trim();
+}
+
+function stateMatches(expected, actual) {
+  const expectedBytes = Buffer.from(expected, 'utf8');
+  const actualBytes = Buffer.from(actual, 'utf8');
+  return expectedBytes.length === actualBytes.length && timingSafeEqual(expectedBytes, actualBytes);
+}
+
+async function verifyCallbackState(options, role, {
+  env = process.env,
+  now = () => new Date(),
+  maxAgeMs = defaultStateMaxAgeMs,
+} = {}) {
+  const stateFile = resolve(requireOption(options, 'state-file'));
+  const callbackState = await readSecretInput(options, {
+    fileOption: 'callback-state-file',
+    envName: 'GITHUB_MANIFEST_STATE',
+    label: 'callback state',
+    env,
+  });
+
+  let record;
+  try {
+    record = JSON.parse(await readFile(stateFile, 'utf8'));
+  } catch (error) {
+    throw new Error(`Could not read a valid manifest state record: ${error.message}`);
+  }
+  if (record?.version !== 1 || record.role !== role || typeof record.state !== 'string') {
+    throw new Error('Manifest state record does not match the requested App role');
+  }
+  const createdAtMs = Date.parse(record.createdAt);
+  const ageMs = now().getTime() - createdAtMs;
+  if (!Number.isFinite(createdAtMs) || ageMs < 0 || ageMs > maxAgeMs) {
+    throw new Error('Manifest state record is expired or has an invalid timestamp; generate a new form');
+  }
+  if (!stateMatches(record.state, callbackState)) {
+    throw new Error('GitHub App callback state did not match the private registration state');
+  }
+  return stateFile;
+}
+
+export async function convertManifest(options, {
+  env = process.env,
+  fetchImpl = fetch,
+  log = console.log,
+  now = () => new Date(),
+  maxAgeMs = defaultStateMaxAgeMs,
+} = {}) {
   const role = requireOption(options, 'role');
-  const code = requireOption(options, 'code');
+  if (Object.hasOwn(options, 'code')) {
+    throw new Error('Do not pass the manifest code on the command line; use GITHUB_MANIFEST_CODE or --code-file');
+  }
+  if (Object.hasOwn(options, 'state')) {
+    throw new Error('Do not pass callback state on the command line; use GITHUB_MANIFEST_STATE or --callback-state-file');
+  }
   const mapping = credentialMap[role];
   if (!mapping) throw new Error(`Unknown App role: ${role}`);
+  const stateFile = await verifyCallbackState(options, role, { env, now, maxAgeMs });
+  const code = await readSecretInput(options, {
+    fileOption: 'code-file',
+    envName: 'GITHUB_MANIFEST_CODE',
+    label: 'one-time manifest conversion code',
+    env,
+  });
   const output = resolve(options.output ?? `${root}/env/dec/registrations/${role}.env`);
   const headers = {
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2026-03-10',
     'User-Agent': 'ores-gh-bots-manifest-bootstrap',
   };
-  if (process.env.GITHUB_MANIFEST_TOKEN) {
-    headers.Authorization = `Bearer ${process.env.GITHUB_MANIFEST_TOKEN}`;
+  if (env.GITHUB_MANIFEST_TOKEN) {
+    headers.Authorization = `Bearer ${env.GITHUB_MANIFEST_TOKEN}`;
   }
-  const response = await fetch(`https://api.github.com/app-manifests/${encodeURIComponent(code)}/conversions`, {
+  const response = await fetchImpl(`https://api.github.com/app-manifests/${encodeURIComponent(code)}/conversions`, {
     method: 'POST',
     headers,
   });
   if (!response.ok) {
-    const body = (await response.text()).slice(0, 1_000);
-    throw new Error(`Manifest conversion failed (${response.status}): ${body}`);
+    const requestId = response.headers?.get?.('x-github-request-id');
+    throw new Error(`Manifest conversion failed (${response.status})${requestId ? `; GitHub request ${requestId}` : ''}`);
   }
   const result = await response.json();
   if (!Number.isSafeInteger(result.id) || result.id <= 0 || typeof result.pem !== 'string' || !result.pem.includes('PRIVATE KEY')) {
@@ -154,22 +246,23 @@ async function convertManifest(options) {
   if (mapping.webhook) lines.push(`${mapping.webhook}=${dotenvValue(result.webhook_secret)}`);
   lines.push('');
 
-  await mkdir(dirname(output), { recursive: true, mode: 0o700 });
-  await writeFile(output, lines.join('\n'), { mode: 0o600 });
-  await chmod(output, 0o600);
-  console.log(`Wrote ${output} with mode 0600. Secret values were not printed.`);
+  await writePrivateFile(output, lines.join('\n'));
+  await unlink(stateFile);
+  log(`Wrote ${output} with mode 0600 and consumed the verified state record. Secret values were not printed.`);
 }
 
-async function main() {
-  const { command, options } = parseOptions(process.argv.slice(2));
-  if (command === 'form') return createForm(options);
-  if (command === 'convert') return convertManifest(options);
+export async function main(argv = process.argv.slice(2), dependencies = {}) {
+  const { command, options } = parseOptions(argv);
+  if (command === 'form') return createForm(options, dependencies);
+  if (command === 'convert') return convertManifest(options, dependencies);
   throw new Error('Usage: node scripts/app-manifest.mjs <form|convert> --role ROLE ...');
 }
 
-try {
-  await main();
-} catch (error) {
-  console.error(error.message);
-  process.exitCode = 1;
+if (process.argv[1] && resolve(process.argv[1]) === resolve(modulePath)) {
+  try {
+    await main();
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
 }
