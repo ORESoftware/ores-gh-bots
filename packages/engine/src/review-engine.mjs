@@ -261,7 +261,12 @@ export class ReviewEngine {
       headSha: pullRequest.head.sha,
     });
     const ci = await getCiSnapshot(this.client, orchestratorToken, job.owner, job.repo, pullRequest.head.sha);
-    const evaluated = evaluateGate({ reviews, ci, requiredCiContexts: this.config.review.requiredCiContexts });
+    const evaluated = evaluateGate({
+      reviews,
+      ci,
+      requiredCiContexts: this.config.review.requiredCiContexts,
+      requiredCiAppIds: this.config.review.requiredCiAppIds,
+    });
     const gate = { ...evaluated, headSha: pullRequest.head.sha };
     await completeGateCheck({
       client: this.client,

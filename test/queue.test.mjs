@@ -42,6 +42,30 @@ test('retries failures and eventually dead-letters', () => {
   } finally { queue.close(); }
 });
 
+test('reclaims an expired lease while attempts remain', () => {
+  const queue = new SqliteQueue({ path: ':memory:', maxAttempts: 2 });
+  try {
+    queue.enqueue(job({ maxAttempts: 2 }));
+    const first = queue.claimNext('worker-1', -1);
+    assert.equal(first.attempts, 1);
+    const second = queue.claimNext('worker-2', 30_000);
+    assert.equal(second.attempts, 2);
+    assert.equal(second.leaseOwner, 'worker-2');
+  } finally { queue.close(); }
+});
+
+test('dead-letters an expired lease after the final attempt', () => {
+  const queue = new SqliteQueue({ path: ':memory:', maxAttempts: 1 });
+  try {
+    queue.enqueue(job({ maxAttempts: 1 }));
+    const first = queue.claimNext('worker-1', -1);
+    assert.equal(first.attempts, 1);
+    assert.equal(queue.claimNext('worker-2', 30_000), null);
+    assert.equal(queue.stats().dead, 1);
+    assert.equal(queue.stats().pending ?? 0, 0);
+  } finally { queue.close(); }
+});
+
 test('persists provider results per exact SHA', () => {
   const queue = new SqliteQueue({ path: ':memory:' });
   try {

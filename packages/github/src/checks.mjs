@@ -37,13 +37,15 @@ export async function updateCheckRun(client, token, owner, repo, checkRunId, inp
   return response.data;
 }
 
-export async function findLatestCheckRun(client, token, owner, repo, headSha, name) {
+export async function findLatestCheckRun(client, token, owner, repo, headSha, name, { externalId = null } = {}) {
   const response = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/check-runs?check_name=${encodeURIComponent(name)}&filter=latest&per_page=100`, { token });
-  return response.data.check_runs?.sort((a, b) => b.id - a.id)[0] ?? null;
+  return (response.data.check_runs ?? [])
+    .filter((check) => externalId === null || check.external_id === externalId)
+    .sort((a, b) => b.id - a.id)[0] ?? null;
 }
 
 export async function ensureInProgressCheck({ client, token, owner, repo, headSha, name, detailsUrl, externalId, summary }) {
-  const existing = await findLatestCheckRun(client, token, owner, repo, headSha, name);
+  const existing = await findLatestCheckRun(client, token, owner, repo, headSha, name, { externalId });
   const payload = {
     name,
     head_sha: headSha,
@@ -58,7 +60,15 @@ export async function ensureInProgressCheck({ client, token, owner, repo, headSh
   };
   if (existing && existing.status !== 'completed') {
     const { head_sha: _headSha, ...updatePayload } = payload;
-    return updateCheckRun(client, token, owner, repo, existing.id, updatePayload);
+    try {
+      return await updateCheckRun(client, token, owner, repo, existing.id, updatePayload);
+    } catch (error) {
+      const status = Number(error?.status ?? error?.response?.status ?? 0);
+      if (![403, 404, 422].includes(status)) throw error;
+      // Another GitHub App may have created a same-name/same-external-ID check.
+      // Check runs can only be updated by the App that created them, so create
+      // an App-owned run rather than allowing the foreign run to block reviews.
+    }
   }
   return createCheckRun(client, token, owner, repo, payload);
 }
