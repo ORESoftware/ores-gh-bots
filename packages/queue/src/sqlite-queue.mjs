@@ -154,9 +154,23 @@ export class SqliteQueue {
     try {
       this.db.prepare(`
         UPDATE jobs
-        SET status = 'pending', lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+        SET status = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'pending' END,
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            last_error = CASE
+              WHEN attempts >= max_attempts THEN COALESCE(last_error, 'lease expired after final attempt')
+              ELSE last_error
+            END,
+            updated_at = ?
         WHERE status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
       `).run(timestamp, timestamp);
+      this.db.prepare(`
+        UPDATE jobs
+        SET status = 'dead',
+            last_error = COALESCE(last_error, 'attempt budget exhausted'),
+            updated_at = ?
+        WHERE status = 'pending' AND attempts >= max_attempts
+      `).run(timestamp);
       const row = this.db.prepare(`
         SELECT * FROM jobs
         WHERE status = 'pending' AND available_at <= ? AND attempts < max_attempts
