@@ -56,11 +56,13 @@ rotate-age:
   sops rotate -i {{encrypted_env}}
   sops --decrypt --input-type dotenv --output-type dotenv {{encrypted_env}} >/dev/null
 
-app-form role owner base_url output="/tmp/ores-gh-app.html":
-  node scripts/app-manifest.mjs form --role "{{role}}" --owner "{{owner}}" --base-url "{{base_url}}" --output "{{output}}"
+app-form role owner base_url output="/tmp/ores-gh-app.html" state_file="/tmp/ores-gh-app.state.json":
+  node scripts/app-manifest.mjs form --role "{{role}}" --owner "{{owner}}" --base-url "{{base_url}}" --output "{{output}}" --state-file "{{state_file}}"
 
-app-convert role code:
-  node scripts/app-manifest.mjs convert --role "{{role}}" --code "{{code}}"
+app-convert role state_file:
+  test -n "${GITHUB_MANIFEST_CODE:-}" || { echo "Set GITHUB_MANIFEST_CODE without placing it in command history." >&2; exit 2; }
+  test -n "${GITHUB_MANIFEST_STATE:-}" || { echo "Set GITHUB_MANIFEST_STATE without placing it in command history." >&2; exit 2; }
+  node scripts/app-manifest.mjs convert --role "{{role}}" --state-file "{{state_file}}"
 
 canary-plan:
   node apps/cli/src/main.mjs rulesets plan --enforcement evaluate --branch-mode all
