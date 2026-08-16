@@ -1,7 +1,7 @@
 {
   "name": "ORES Claude Reviewer",
   "url": "https://github.com/ORESoftware/ores-gh-bots",
-  "public": false,
+  "public": true,
   "default_permissions": {
     "checks": "write",
     "metadata": "read"

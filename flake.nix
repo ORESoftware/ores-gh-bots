@@ -10,7 +10,7 @@
     in {
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
-          packages = with pkgs; [ nodejs_22 git just sops age jq ];
+          packages = with pkgs; [ nodejs_22 git just sops age jq kubectl ];
         };
       });
     };

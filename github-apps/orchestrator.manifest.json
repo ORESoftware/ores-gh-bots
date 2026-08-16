@@ -1,20 +1,21 @@
 {
   "name": "ORES Review Orchestrator",
   "url": "https://github.com/ORESoftware/ores-gh-bots",
-  "hook_attributes": {"url": "https://replace.example/webhooks/github", "active": true},
+  "hook_attributes": {
+    "url": "https://replace.example/webhooks/github",
+    "active": true
+  },
   "redirect_url": "https://replace.example/github/app-manifest/callback",
-  "public": false,
+  "public": true,
   "default_permissions": {
-    "actions": "read",
-    "checks": "write",
-    "contents": "read",
+    "checks": "read",
     "issues": "read",
     "metadata": "read",
-    "pull_requests": "write"
+    "pull_requests": "write",
+    "statuses": "read"
   },
   "default_events": [
     "check_run",
-    "check_suite",
     "installation",
     "installation_repositories",
     "issue_comment",

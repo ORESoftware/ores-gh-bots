@@ -4,7 +4,6 @@
   "public": false,
   "default_permissions": {
     "actions": "write",
-    "contents": "read",
     "metadata": "read"
   },
   "default_events": []
