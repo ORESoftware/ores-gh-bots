@@ -24,14 +24,14 @@ function pullRequest(sha = 'abc') {
   };
 }
 
-function fakeClient({ currentSha = 'abc' } = {}) {
+function fakeClient({ currentSha = 'abc', patch = '@@ -1 +1 @@\n-old\n+new' } = {}) {
   let checkId = 100;
   const calls = [];
   return {
     calls,
     async paginate(path) {
       calls.push({ method: 'PAGINATE', path });
-      if (path.includes('/files')) return [{ filename: 'a.js', status: 'modified', additions: 1, deletions: 0, changes: 1, patch: '@@ -1 +1 @@\n-old\n+new' }];
+      if (path.includes('/files')) return [{ filename: 'a.js', status: 'modified', additions: 1, deletions: 0, changes: 1, patch }];
       throw new Error(`Unexpected paginate: ${path}`);
     },
     async request(method, path, options = {}) {
@@ -115,6 +115,19 @@ test('engine refuses to review a stale queued SHA and enqueues the current SHA',
     assert.equal(result.skipped, 'stale-head');
     const replacement = queue.claimNext('worker', 30_000);
     assert.equal(replacement.headSha, 'new-sha');
+    assert.equal(client.calls.some((call) => call.method === 'POST' && call.path.endsWith('/check-runs')), false);
+  } finally { queue.close(); }
+});
+
+test('engine rejects binary, unavailable, or truncated review context before provider execution', async () => {
+  const queue = new SqliteQueue({ path: ':memory:' });
+  const client = fakeClient({ patch: null });
+  const engine = new ReviewEngine({ config: config(), client, auth, queue, logger: silentLogger, metrics: new Metrics(), fetchImpl: providerFetch });
+  try {
+    await assert.rejects(() => engine.process({
+      id: 1, type: 'review', installationId: 1, owner: 'O', repo: 'R', prNumber: 1, headSha: 'abc', reason: 'test',
+      attempts: 1, maxAttempts: 1,
+    }), /diff coverage is incomplete/);
     assert.equal(client.calls.some((call) => call.method === 'POST' && call.path.endsWith('/check-runs')), false);
   } finally { queue.close(); }
 });

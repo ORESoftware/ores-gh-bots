@@ -34,5 +34,12 @@ test('Anthropic request forces exactly one review tool', () => {
 test('extracts the forced Anthropic tool result', () => {
   const input = { verdict: 'approve' };
   assert.equal(extractAnthropicReview({ content: [{ type: 'tool_use', name: 'submit_code_review', input }] }), input);
-  assert.throws(() => extractAnthropicReview({ content: [], stop_reason: 'end_turn' }), /did not call/);
+  assert.throws(() => extractAnthropicReview({ content: [], stop_reason: 'end_turn' }), /exactly once/);
+  assert.throws(() => extractAnthropicReview({
+    content: [
+      { type: 'tool_use', name: 'submit_code_review', input },
+      { type: 'tool_use', name: 'submit_code_review', input },
+    ],
+    stop_reason: 'tool_use',
+  }), /exactly once/);
 });
