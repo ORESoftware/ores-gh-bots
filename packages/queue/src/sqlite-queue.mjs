@@ -366,12 +366,14 @@ export class SqliteQueue {
     deliveriesBefore = nowMs() - 30 * 24 * 60 * 60_000,
     completedBefore = nowMs() - 14 * 24 * 60 * 60_000,
     deadBefore = nowMs() - 30 * 24 * 60 * 60_000,
-    reviewsBefore = nowMs() - 30 * 24 * 60 * 60_000,
+    reviewsBefore = null,
   } = {}) {
     const deliveries = this.db.prepare('DELETE FROM deliveries WHERE received_at < ?').run(deliveriesBefore).changes;
     const completed = this.db.prepare("DELETE FROM jobs WHERE status = 'completed' AND updated_at < ?").run(completedBefore).changes;
     const dead = this.db.prepare("DELETE FROM jobs WHERE status = 'dead' AND updated_at < ?").run(deadBefore).changes;
-    const reviews = this.db.prepare('DELETE FROM reviews WHERE updated_at < ?').run(reviewsBefore).changes;
+    const reviews = reviewsBefore === null
+      ? 0
+      : this.db.prepare('DELETE FROM reviews WHERE updated_at < ?').run(reviewsBefore).changes;
     return { deliveries, jobs: completed + dead, reviews };
   }
 

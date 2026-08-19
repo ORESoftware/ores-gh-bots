@@ -100,6 +100,21 @@ test('persists provider results per exact SHA', () => {
   } finally { queue.close(); }
 });
 
+
+test('default pruning preserves review evidence for long-lived open pull requests', () => {
+  const queue = new SqliteQueue({ path: ':memory:' });
+  try {
+    queue.recordReview({ owner: 'O', repo: 'R', prNumber: 2, headSha: 'abc', provider: 'openai', result: { verdict: 'approve' } });
+    const pruned = queue.prune({
+      deliveriesBefore: Date.now() + 1,
+      completedBefore: Date.now() + 1,
+      deadBefore: Date.now() + 1,
+    });
+    assert.equal(pruned.reviews, 0);
+    assert.equal(queue.getReviews({ owner: 'O', repo: 'R', prNumber: 2, headSha: 'abc' }).openai.verdict, 'approve');
+  } finally { queue.close(); }
+});
+
 test('prunes old deliveries, terminal jobs, and review evidence', () => {
   const queue = new SqliteQueue({ path: ':memory:' });
   try {

@@ -12,6 +12,7 @@ test('review dispatch keeps untrusted workflow inputs out of shell source', asyn
   assert.doesNotMatch(runBlock.match(/run:.*$/mu)?.[0] ?? '', /\$\{\{\s*inputs\./u);
   assert.match(workflow, /OWNER_ALLOWLIST: \$\{\{ vars\.OWNER_ALLOWLIST \}\}/u);
   assert.match(workflow, /REQUIRED_CI_APP_IDS: \$\{\{ vars\.REQUIRED_CI_APP_IDS \}\}/u);
+  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/u);
   assert.match(workflow, /persist-credentials: false/u);
 });
 
