@@ -78,6 +78,7 @@ export function collectPullRequestFiles(files, { maxFiles, maxFileBytes, maxDiff
       binary_or_unavailable_files: binaryFiles,
       included_bytes: totalBytes,
       limits: { maxFiles, maxFileBytes, maxDiffBytes },
+      complete: omittedFiles === 0 && truncatedFiles === 0 && binaryFiles === 0,
     },
   };
 }
