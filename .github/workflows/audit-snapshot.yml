@@ -21,6 +21,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          archive="$RUNNER_TEMP/source-snapshot.tar.gz"
+          checksum="$RUNNER_TEMP/source-snapshot.tar.gz.sha256"
           tar \
             --sort=name \
             --mtime='UTC 1970-01-01' \
@@ -28,16 +30,15 @@ jobs:
             --group=0 \
             --numeric-owner \
             --exclude=.git \
-            --exclude=source-snapshot.tar.gz \
-            -czf source-snapshot.tar.gz .
-          sha256sum source-snapshot.tar.gz > source-snapshot.tar.gz.sha256
+            -czf "$archive" .
+          sha256sum "$archive" > "$checksum"
       - name: Upload source snapshot
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: source-snapshot-${{ github.sha }}
           path: |
-            source-snapshot.tar.gz
-            source-snapshot.tar.gz.sha256
+            ${{ runner.temp }}/source-snapshot.tar.gz
+            ${{ runner.temp }}/source-snapshot.tar.gz.sha256
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
