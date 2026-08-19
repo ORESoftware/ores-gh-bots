@@ -1,17 +1,26 @@
 #!/usr/bin/env node
 import { AppAuth, GitHubClient } from '../../../packages/github/src/index.mjs';
-import { createLogger, loadConfig, Metrics, validateRuntimeConfig } from '../../../packages/core/src/index.mjs';
+import {
+  createLogger,
+  loadConfig,
+  Metrics,
+  validateControlPlaneConfig,
+  validateRuntimeConfig,
+} from '../../../packages/core/src/index.mjs';
 import { SqliteQueue } from '../../../packages/queue/src/index.mjs';
 import { ReviewEngine } from '../../../packages/engine/src/index.mjs';
 import { Reconciler, startReconciler } from './reconciler.mjs';
 import { createWebhookServer } from './server.mjs';
 import { startWorkerPool } from './worker.mjs';
 
+const workerOnly = process.argv.includes('--worker-only');
 const config = loadConfig();
 validateRuntimeConfig(config, {
-  webhook: !process.argv.includes('--worker-only'),
+  webhook: !workerOnly,
   providers: config.gha.mode !== 'offload',
 });
+validateControlPlaneConfig(config, { webhook: !workerOnly });
+
 const logger = createLogger({ service: 'ores-gh-bots' });
 const metrics = new Metrics();
 const queue = new SqliteQueue({ path: config.queue.path, maxAttempts: config.queue.maxAttempts });
@@ -31,7 +40,7 @@ const workerPromise = startWorkerPool({
   signal: abortController.signal,
 });
 
-if (!process.argv.includes('--worker-only')) {
+if (!workerOnly) {
   server = createWebhookServer({ config, queue, logger: logger.child({ component: 'http' }), metrics, readiness: () => ready });
   await new Promise((resolve, reject) => {
     server.once('error', reject);

@@ -19,9 +19,11 @@ export function buildAnthropicRequest({ model, maxTokens, context }) {
 }
 
 export function extractAnthropicReview(response) {
-  const block = response?.content?.find((item) => item.type === 'tool_use' && item.name === 'submit_code_review');
-  if (!block) throw new Error(`Anthropic response did not call submit_code_review (stop_reason=${response?.stop_reason ?? 'unknown'})`);
-  return block.input;
+  const blocks = (response?.content ?? []).filter((item) => item.type === 'tool_use' && item.name === 'submit_code_review');
+  if (blocks.length !== 1) {
+    throw new Error(`Anthropic response must call submit_code_review exactly once (received=${blocks.length}, stop_reason=${response?.stop_reason ?? 'unknown'})`);
+  }
+  return blocks[0].input;
 }
 
 export async function reviewWithAnthropic({ config, context, fetchImpl = fetch }) {
@@ -38,5 +40,8 @@ export async function reviewWithAnthropic({ config, context, fetchImpl = fetch }
     fetchImpl,
   });
   if (response?.stop_reason === 'max_tokens') throw new Error('Anthropic review was truncated at max_tokens');
-  return validateReviewResult(extractAnthropicReview(response), { maxFindings: context.maxFindings });
+  return validateReviewResult(extractAnthropicReview(response), {
+    maxFindings: context.maxFindings,
+    allowApproval: context.collection?.complete !== false,
+  });
 }

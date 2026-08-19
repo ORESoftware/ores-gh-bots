@@ -53,9 +53,12 @@ export async function reviewWithOpenAI({ config, context, fetchImpl = fetch }) {
     timeoutMs: context.timeoutMs,
     fetchImpl,
   });
-  if (response?.status && !['completed', 'in_progress'].includes(response.status)) {
+  if (response?.status && response.status !== 'completed') {
     throw new Error(`OpenAI response status was ${response.status}`);
   }
   const parsed = JSON.parse(extractOpenAIText(response));
-  return validateReviewResult(parsed, { maxFindings: context.maxFindings });
+  return validateReviewResult(parsed, {
+    maxFindings: context.maxFindings,
+    allowApproval: context.collection?.complete !== false,
+  });
 }
