@@ -100,6 +100,41 @@ in `--sink` when it cannot delete them. That is an environment workaround, not
 a design choice — on a normal filesystem the `rmSync` path succeeds and the
 sink is never touched.
 
+## Pushing the fleet
+
+Cowork's sandboxes cannot push. The cloud container's egress proxy allowlists
+repositories per session and refuses to inject a credential for anything else
+(`access denied by the git proxy: … is not in this session's authorized
+repository set`), and the desktop VM's proxy 403s even on reads. A GitHub PAT
+does not help — the proxy replaces whatever credential is supplied, which is
+demonstrable by sending a deliberately invalid token and still getting an
+authenticated response.
+
+`scripts/push-fleet.sh` is therefore built to run on **your own machine**:
+
+```bash
+bash scripts/push-fleet.sh                 # dry run — changes nothing
+bash scripts/push-fleet.sh --apply         # push
+bash scripts/push-fleet.sh --apply --tags  # also push local tags
+```
+
+It fetches first, so decisions are made against real remote state rather than
+the stale remote-tracking refs these checkouts carry. Then per branch:
+
+| Situation | What it does |
+| --- | --- |
+| No branch on origin | `push --set-upstream` |
+| Remote is an ancestor | fast-forward push |
+| Local is an ancestor | nothing to send |
+| Genuinely diverged | **records it, pushes nothing** |
+
+It never force-pushes, rebases, resets, stashes, or deletes a ref. Diverged
+branches are written to `push-diverged-<stamp>.txt` for a real merge, because a
+divergence is two intents meeting and the resolution is a judgement, not a flag.
+
+Skipped: `rabbitmq` and `gleam-lang` (upstream projects we only have clones of),
+plus `dd`, `dd-next-1` and `dancing-dragons` by standing request.
+
 ## Layout
 
 | Path | What it does |
@@ -114,6 +149,7 @@ sink is never touched.
 | `src/cli.ts` | Nightly reconciler entry point |
 | `src/hygiene/` | Fleet .gitignore hygiene: repo discovery, idempotent patching |
 | `src/hygiene-cli.ts` | Hygiene entry point |
+| `scripts/push-fleet.sh` | Fleet push, run from your own machine |
 
 ## Scheduling note
 
