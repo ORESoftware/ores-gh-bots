@@ -1,0 +1,20 @@
+{
+  "name": "@oresoftware/ores-gh-bots",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GitHub automation bots for the ORESoftware fleet: nightly cross-org PR reconciliation, dependency-graph-driven PR updates, and readiness-gated auto-merge.",
+  "type": "module",
+  "engines": { "node": ">=22.6" },
+  "scripts": {
+    "reconcile": "node --experimental-strip-types src/cli.ts",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "comments": {
+    "devDependencies": "Optional. Runtime and tests use only Node built-ins so the nightly job needs no install step; devDependencies exist purely for local `npm run typecheck`."
+  }
+}
