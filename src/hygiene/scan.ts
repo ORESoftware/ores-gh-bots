@@ -35,8 +35,16 @@ export interface FoundRepo {
  * Finds git repositories under `root`, depth-first but not descending into a
  * repo once found — nested repos are almost always submodules or vendored
  * copies, and rewriting their .gitignore would dirty someone else's tree.
+ *
+ * The default depth is 6, not 3. A depth of 3 reaches `root/org/repo` and stops,
+ * which silently misses the `root/org/suborg/repo` layout this fleet uses in
+ * places (`3FA-app/3fa-app-test/*`, `messaging-intel/msgint-monorepo/apps/*`).
+ * That blind spot hid 318 repositories from a fleet-wide pass — the traversal
+ * reported a confident total and a clean result while never having looked. When
+ * the cost of going deeper is one stat() per directory and the cost of stopping
+ * short is an invisible gap, the default belongs on the deep side.
  */
-export function findRepos(root: string, maxDepth = 3): FoundRepo[] {
+export function findRepos(root: string, maxDepth = 6): FoundRepo[] {
   const out: FoundRepo[] = [];
 
   const walk = (dir: string, depth: number): void => {

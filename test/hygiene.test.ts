@@ -104,6 +104,29 @@ describe('repo discovery', () => {
     assert.deepEqual(found.sort(), ['org-a/repo-1', 'org-a/repo-2']);
   });
 
+  test('finds repos nested deeper than org/repo — the 318-repo blind spot', () => {
+    // Regression guard. The original default of 3 reached root/org/repo and
+    // stopped, so the whole root/org/suborg/repo layout was invisible to a pass
+    // that nonetheless reported a total and a clean result.
+    const root = mkdtempSync(join(tmpdir(), 'fleet-deep-'));
+    const mk = (p: string) => {
+      mkdirSync(join(root, p), { recursive: true });
+      mkdirSync(join(root, p, '.git'), { recursive: true });
+    };
+    mk('org/repo');
+    mk('org/suborg/repo');
+    mk('org/suborg/deeper/repo');
+    const found = findRepos(root).map((r) => r.path.slice(root.length + 1)).sort();
+    assert.deepEqual(found, ['org/repo', 'org/suborg/deeper/repo', 'org/suborg/repo']);
+  });
+
+  test('an explicit shallow depth still limits the walk', () => {
+    const root = mkdtempSync(join(tmpdir(), 'fleet-shallow-'));
+    mkdirSync(join(root, 'org/suborg/repo/.git'), { recursive: true });
+    assert.deepEqual(findRepos(root, 2), []);
+    assert.equal(findRepos(root, 6).length, 1);
+  });
+
   test('identifies a worktree by its .git being a file', () => {
     const root = mkdtempSync(join(tmpdir(), 'fleet-wt-'));
     mkdirSync(join(root, 'wt'), { recursive: true });
