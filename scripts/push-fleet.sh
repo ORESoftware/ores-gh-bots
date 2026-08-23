@@ -65,7 +65,7 @@ find_repos() {
   done
 }
 
-total_repos=0; pushed=0; newbr=0; diverged=0; uptodate=0; failed=0; skipped=0
+total_repos=0; pushed=0; newbr=0; diverged=0; uptodate=0; failed=0; skipped=0; deleted_upstream=0
 
 while IFS= read -r repo; do
   [ -d "$repo/.git" ] || [ -f "$repo/.git" ] || continue
@@ -82,7 +82,22 @@ while IFS= read -r repo; do
   total_repos=$((total_repos+1))
   # Real remote state. Without this, "ahead/behind" is whatever was true at the
   # last fetch, which on these checkouts is badly stale.
-  git -C "$repo" fetch --prune --quiet origin 2>/dev/null
+  #
+  # A failed fetch is NOT a reason to fall back on the stale view - that is how a
+  # temporarily unreachable remote turns into a push decided from week-old data.
+  # Skip the repo and say so.
+  if ! git -C "$repo" fetch --prune --quiet origin 2>/dev/null; then
+    rec "$repo" "-" "fetch-failed" "remote unreachable; skipped rather than deciding on stale refs"
+    say "  skip (fetch failed): ${repo#$ROOT/}"
+    skipped=$((skipped+1)); continue
+  fi
+
+  # A repo with no commits has nothing to send; report it rather than letting it
+  # vanish silently from the fleet totals.
+  if ! git -C "$repo" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    rec "$repo" "-" "empty-repo" "no commits yet"
+    skipped=$((skipped+1)); continue
+  fi
 
   while IFS= read -r br; do
     [ -n "$br" ] || continue
@@ -90,6 +105,15 @@ while IFS= read -r repo; do
     remote_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/remotes/origin/$br")
 
     if [ -z "$remote_sha" ]; then
+      # A branch with a configured upstream whose remote ref is gone after
+      # --prune was DELETED on purpose - that is what a merge-and-delete reaper
+      # leaves behind. Pushing it "new" resurrects every merged branch on every
+      # run. Only a branch that never had an upstream is genuinely new.
+      if git -C "$repo" config --get "branch.$br.merge" >/dev/null 2>&1; then
+        rec "$repo" "$br" "upstream-deleted" "tracked branch removed on origin; not recreating"
+        deleted_upstream=$((deleted_upstream+1))
+        continue
+      fi
       if [ "$APPLY" -eq 1 ]; then
         if err=$(git -C "$repo" push --set-upstream origin "refs/heads/$br:refs/heads/$br" 2>&1); then
           rec "$repo" "$br" "pushed-new" "created on origin"; newbr=$((newbr+1))
@@ -152,6 +176,7 @@ else
 fi
 say "  already current  : $uptodate"
 say "  DIVERGED         : $diverged  <- need a real merge, nothing was forced"
+say "  upstream deleted : $deleted_upstream  <- deliberately removed on origin, not recreated"
 say "  failed           : $failed"
 say ""
 say "  full report : $REPORT"

@@ -4,11 +4,15 @@
   "private": true,
   "description": "GitHub automation bots for the ORESoftware fleet: nightly cross-org PR reconciliation, dependency-graph-driven PR updates, and readiness-gated auto-merge.",
   "type": "module",
-  "engines": { "node": ">=22.6" },
+  "engines": {
+    "node": ">=22.6"
+  },
   "scripts": {
     "reconcile": "node --experimental-strip-types src/cli.ts",
     "test": "node --experimental-strip-types --test test/*.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint:ores": "if [ -f .ores-lint/lint.sh ]; then sh .ores-lint/lint.sh; else echo 'ores-lint not installed'; fi",
+    "prepublishOnly": "npm run lint:ores"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
@@ -16,5 +20,13 @@
   },
   "comments": {
     "devDependencies": "Optional. Runtime and tests use only Node built-ins so the nightly job needs no install step; devDependencies exist purely for local `npm run typecheck`."
+  },
+  "oresLint": {
+    "note": "Declared, not installed. ores-lint resolves these from a global install - see .ores-lint/README.md",
+    "requires": {
+      "eslint": ">=9",
+      "typescript-eslint": ">=8 (optional; without it .ts files are skipped)"
+    },
+    "install": "npm i -g eslint typescript-eslint"
   }
 }
