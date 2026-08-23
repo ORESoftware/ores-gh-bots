@@ -40,7 +40,7 @@ GITHUB_TOKEN=… node --experimental-strip-types src/cli.ts --apply
 Dry run is the default. Pass `--apply` to actually merge, update and comment.
 
 ```bash
-npm test          # 46 tests, no install required
+npm test          # 67 tests, no install required
 npm run typecheck # needs `npm i` for typescript
 ```
 
@@ -61,6 +61,45 @@ so a registry outage can never take the fleet's PR hygiene down with it. The
   Conflicted PRs get a labelled dossier telling the resolver how much history to
   read and what dependency movement probably caused it.
 
+## Second bot: fleet git hygiene
+
+`src/hygiene-cli.ts` ensures every repo under a checkout root ignores
+`tmp/temp/` and `tmp/worktrees/` — the scratch and worktree paths that agent
+runs write into, whose untracked entries otherwise clutter every `git status`
+and invite being swept into unrelated commits (chat #78, DEN-3956).
+
+```bash
+node --experimental-strip-types src/hygiene-cli.ts --root ~/codes            # dry run
+node --experimental-strip-types src/hygiene-cli.ts --root ~/codes --commit   # apply + commit
+```
+
+Three properties make it safe to run repeatedly across a thousand repos:
+
+- **The patterns live in a delimited managed block.** Appending loose lines is
+  what makes this kind of script un-runnable twice — the second pass either
+  duplicates them or has to guess which trailing lines it wrote. A marked block
+  can be located, compared, and rewritten in place.
+- **It stages only `.gitignore`.** These repos routinely carry unrelated work in
+  progress. The commit uses `--only -- .gitignore` and verifies the staged set
+  is exactly that one path before committing; anything else aborts the repo.
+- **It respects rules the repo already has.** A repo ignoring `tmp/` is left
+  completely untouched, and a repo ignoring only `tmp/worktrees/` gets just the
+  missing pattern — no redundant block.
+
+Skipped by design: `dd` and `dd-next-1` (excluded from automated agent work by
+standing request), `_to_delete`, `node_modules`, `target`, `vendor`, `dist`,
+`build`, any repo nested inside another repo, and git worktrees, which share
+their parent checkout's `.gitignore`.
+
+### A note on this filesystem
+
+The Cowork mount forbids `unlink`, so git leaves its `.lock` files behind and
+the *next* git command in that repo fails with "unable to create … File
+exists". `sweepGitLocks` runs after every git invocation and parks those files
+in `--sink` when it cannot delete them. That is an environment workaround, not
+a design choice — on a normal filesystem the `rmSync` path succeeds and the
+sink is never touched.
+
 ## Layout
 
 | Path | What it does |
@@ -72,7 +111,9 @@ so a registry outage can never take the fleet's PR hygiene down with it. The
 | `src/readiness.ts` | Gates and confidence signals |
 | `src/conflicts.ts` | Side-picking rejection, conflict dossiers |
 | `src/reconcile.ts` | The pass itself |
-| `src/cli.ts` | Entry point |
+| `src/cli.ts` | Nightly reconciler entry point |
+| `src/hygiene/` | Fleet .gitignore hygiene: repo discovery, idempotent patching |
+| `src/hygiene-cli.ts` | Hygiene entry point |
 
 ## Scheduling note
 
