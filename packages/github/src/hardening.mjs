@@ -149,7 +149,6 @@ export async function ensureOrganizationRepository(client, token, {
   const body = {
     name,
     description,
-    private: Boolean(isPrivate),
     has_issues: true,
     has_projects: false,
     has_wiki: false,
@@ -157,6 +156,7 @@ export async function ensureOrganizationRepository(client, token, {
     delete_branch_on_merge: true,
   };
   if (visibility) body.visibility = visibility;
+  else body.private = Boolean(isPrivate);
   const response = await client.request('POST', `/orgs/${encodeURIComponent(owner)}/repos`, { token, body });
   return { action: 'created', repository: response.data.full_name, id: response.data.id };
 }
