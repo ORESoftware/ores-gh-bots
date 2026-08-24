@@ -15,6 +15,7 @@
     "start": "node apps/orchestrator/src/main.mjs",
     "worker": "node apps/orchestrator/src/main.mjs --worker-only",
     "cli": "node apps/cli/src/main.mjs",
+    "hardening": "node apps/cli/src/hardening.mjs",
     "review": "node apps/runner/src/main.mjs",
     "test": "node --test --test-reporter=spec",
     "lint": "node scripts/lint.mjs",
