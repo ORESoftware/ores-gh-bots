@@ -1,4 +1,6 @@
+# The Age recipient is public and should be committed after bootstrap.
+# Replace the placeholder with `just set-age-recipient age1...`.
 creation_rules:
-  - path_regex: env/enc/.*\.(yaml|json|env)$
-    age: >-
-      age1replacewithyourdeploymentrecipient000000000000000000000000000000000000000
+  - path_regex: ^env/enc/.*\.(yaml|json|env)$
+    age:
+      - age1replacewithapublicrecipient000000000000000000000000000000000000000

@@ -2,6 +2,12 @@ import { collectPullRequestFiles, redactText } from '../../core/src/index.mjs';
 
 export function buildReviewContext({ pullRequest, files, reviewConfig }) {
   const collected = collectPullRequestFiles(files, reviewConfig);
+  if (!collected.collection.complete) {
+    const { omitted_files, truncated_files, binary_or_unavailable_files } = collected.collection;
+    throw new Error(
+      `pull-request diff coverage is incomplete (omitted=${omitted_files}, truncated=${truncated_files}, binary_or_unavailable=${binary_or_unavailable_files})`,
+    );
+  }
   return {
     repository: pullRequest.base.repo.full_name,
     number: pullRequest.number,
