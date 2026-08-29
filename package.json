@@ -19,7 +19,9 @@
     "test": "node --test --test-reporter=spec",
     "lint": "node scripts/lint.mjs",
     "check": "npm run lint && npm test",
-    "verify": "node scripts/verify-repository.mjs"
+    "verify:repository": "node scripts/verify-repository.mjs",
+    "verify:github-apps": "node scripts/verify-github-apps.mjs",
+    "verify": "npm run verify:repository && npm run verify:github-apps"
   },
   "license": "MIT"
 }

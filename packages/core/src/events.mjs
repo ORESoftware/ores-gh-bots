@@ -56,10 +56,11 @@ export function routeWebhookEvent({ event, payload }) {
     }
   }
 
-  if (event === 'check_suite' && action === 'completed') {
-    const job = checkPullRequestJob(payload, 'gate', 'check_suite.completed');
-    if (job) jobs.push({ ...job, force: true });
-  }
+  // `check_run.completed` is the canonical CI re-evaluation trigger. GitHub also
+  // emits `check_suite.completed` for the same activity, but a suite does not
+  // identify individual check names and can be emitted for ORES-owned checks.
+  // Routing both events therefore creates duplicate work and can recursively
+  // re-enqueue the aggregate gate when the gate itself completes.
 
   if (event === 'issue_comment' && action === 'created' && payload.issue?.pull_request) {
     const body = String(payload.comment?.body ?? '').trim();

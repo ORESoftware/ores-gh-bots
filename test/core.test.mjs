@@ -12,6 +12,7 @@ import {
   redactText,
   routeWebhookEvent,
   validateReviewResult,
+  validateRuntimeConfig,
   verifyWebhookSignature,
 } from '../packages/core/src/index.mjs';
 
@@ -75,6 +76,26 @@ test('gate fails closed for missing or non-approving providers', () => {
   assert.equal(passed.conclusion, 'success');
 });
 
+test('gate pins required CI contexts to expected GitHub App identities', () => {
+  const reviews = { openai: goodReview, claude: goodReview };
+  const passed = evaluateGate({
+    reviews,
+    ci: [{ context: 'ci/verify', state: 'success', appId: 42 }],
+    requiredCiContexts: ['ci/verify'],
+    requiredCiAppIds: { 'ci/verify': 42 },
+  });
+  assert.equal(passed.conclusion, 'success');
+
+  const spoofed = evaluateGate({
+    reviews,
+    ci: [{ context: 'ci/verify', state: 'success', appId: 99 }],
+    requiredCiContexts: ['ci/verify'],
+    requiredCiAppIds: { 'ci/verify': 42 },
+  });
+  assert.equal(spoofed.conclusion, 'failure');
+  assert.match(spoofed.ciStates[0].reason, /app identity mismatch/);
+});
+
 test('routes supported PR and manual review events', () => {
   const base = {
     installation: { id: 77 },
@@ -88,6 +109,78 @@ test('routes supported PR and manual review events', () => {
   } })[0];
   assert.equal(manual.type, 'gate');
   assert.equal(manual.needsAuthorization, true);
+});
+
+test('uses check_run completion as the sole CI re-evaluation trigger', () => {
+  const base = {
+    action: 'completed',
+    installation: { id: 77 },
+    repository: { name: 'repo', owner: { login: 'ORG' } },
+  };
+  const external = routeWebhookEvent({
+    event: 'check_run',
+    payload: {
+      ...base,
+      check_run: { name: 'ci/verify', head_sha: 'abc', pull_requests: [{ number: 9 }] },
+    },
+  });
+  assert.equal(external.length, 1);
+  assert.equal(external[0].type, 'gate');
+  assert.equal(external[0].headSha, 'abc');
+
+  const own = routeWebhookEvent({
+    event: 'check_run',
+    payload: {
+      ...base,
+      check_run: { name: 'ores-review/gate', head_sha: 'abc', pull_requests: [{ number: 9 }] },
+    },
+  });
+  assert.deepEqual(own, []);
+
+  const suite = routeWebhookEvent({
+    event: 'check_suite',
+    payload: {
+      ...base,
+      check_suite: { head_sha: 'abc', pull_requests: [{ number: 9 }] },
+    },
+  });
+  assert.deepEqual(suite, []);
+});
+
+test('runtime config requires independent reviewer and gate App identities by default', () => {
+  const base = {
+    GITHUB_APP_ID: '1',
+    GITHUB_APP_PRIVATE_KEY: 'orchestrator-key',
+    GITHUB_WEBHOOK_SECRET: 'webhook-secret',
+    OPENAI_API_KEY: 'openai-key',
+    ANTHROPIC_API_KEY: 'anthropic-key',
+  };
+  assert.throws(() => validateRuntimeConfig(loadConfig(base)), /OPENAI_REVIEW_APP_ID/);
+
+  const distinct = {
+    ...base,
+    OPENAI_REVIEW_APP_ID: '2',
+    OPENAI_REVIEW_APP_PRIVATE_KEY: 'openai-app-key',
+    CLAUDE_REVIEW_APP_ID: '3',
+    CLAUDE_REVIEW_APP_PRIVATE_KEY: 'claude-app-key',
+    GATE_APP_ID: '4',
+    GATE_APP_PRIVATE_KEY: 'gate-app-key',
+    REQUIRED_CI_CONTEXTS: 'ci/verify',
+    REQUIRED_CI_APP_IDS: 'ci/verify=42',
+  };
+  const distinctConfig = loadConfig(distinct);
+  assert.doesNotThrow(() => validateRuntimeConfig(distinctConfig));
+  assert.deepEqual(distinctConfig.review.requiredCiAppIds, { 'ci/verify': 42 });
+
+  assert.throws(() => validateRuntimeConfig(loadConfig({
+    ...distinct,
+    CLAUDE_REVIEW_APP_ID: '2',
+  })), /identities must be distinct/);
+
+  assert.doesNotThrow(() => validateRuntimeConfig(loadConfig({
+    ...base,
+    ALLOW_SHARED_APP_IDENTITY: 'true',
+  })));
 });
 
 test('owner allowlist fails closed', () => {
