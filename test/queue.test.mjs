@@ -19,6 +19,58 @@ test('deduplicates webhook deliveries and stable SHA jobs', () => {
   } finally { queue.close(); }
 });
 
+test('acceptWebhook records delivery and jobs atomically', () => {
+  const queue = new SqliteQueue({ path: ':memory:' });
+  try {
+    const first = queue.acceptWebhook({
+      deliveryId: 'd-atomic',
+      event: 'pull_request',
+      action: 'opened',
+      jobs: [job()],
+    });
+    assert.equal(first.duplicate, false);
+    assert.equal(first.inserted, 1);
+    assert.equal(queue.hasDelivery('d-atomic'), true);
+    assert.equal(queue.stats().pending, 1);
+
+    const duplicate = queue.acceptWebhook({
+      deliveryId: 'd-atomic',
+      event: 'pull_request',
+      action: 'opened',
+      jobs: [job({ headSha: 'other' })],
+    });
+    assert.equal(duplicate.duplicate, true);
+    assert.equal(duplicate.inserted, 0);
+    assert.equal(queue.stats().pending, 1);
+  } finally { queue.close(); }
+});
+
+test('acceptWebhook rolls back the delivery when a job is invalid', () => {
+  const queue = new SqliteQueue({ path: ':memory:' });
+  try {
+    assert.throws(
+      () => queue.acceptWebhook({
+        deliveryId: 'd-rollback',
+        event: 'issue_comment',
+        action: 'created',
+        jobs: [job({ installationId: 0 })],
+      }),
+      /Invalid queue job/,
+    );
+    assert.equal(queue.hasDelivery('d-rollback'), false);
+    assert.equal(queue.stats().pending ?? 0, 0);
+
+    const recovered = queue.acceptWebhook({
+      deliveryId: 'd-rollback',
+      event: 'issue_comment',
+      action: 'created',
+      jobs: [job()],
+    });
+    assert.equal(recovered.duplicate, false);
+    assert.equal(recovered.inserted, 1);
+  } finally { queue.close(); }
+});
+
 test('leases, completes, and reports queue jobs', () => {
   const queue = new SqliteQueue({ path: ':memory:' });
   try {

@@ -112,6 +112,41 @@ export class SqliteQueue {
     return result.changes === 1;
   }
 
+  hasDelivery(deliveryId) {
+    return Boolean(
+      this.db.prepare('SELECT 1 AS present FROM deliveries WHERE delivery_id = ?').get(deliveryId),
+    );
+  }
+
+  /**
+   * Record a GitHub delivery and enqueue its jobs in one transaction.
+   * If enqueue fails, the delivery row is rolled back so GitHub retries
+   * are not swallowed as duplicates.
+   */
+  acceptWebhook({ deliveryId, event, action = null, jobs = [] }) {
+    if (!deliveryId || !event) throw new Error('deliveryId and event are required');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const delivery = this.db.prepare(`
+        INSERT OR IGNORE INTO deliveries(delivery_id, event, action, received_at)
+        VALUES (?, ?, ?, ?)
+      `).run(deliveryId, event, action, nowMs());
+      if (delivery.changes !== 1) {
+        this.db.exec('COMMIT');
+        return { duplicate: true, inserted: 0, jobCount: jobs.length };
+      }
+      let inserted = 0;
+      for (const job of jobs) {
+        if (this.enqueue(job).inserted) inserted += 1;
+      }
+      this.db.exec('COMMIT');
+      return { duplicate: false, inserted, jobCount: jobs.length };
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+  }
+
   enqueue(job) {
     if (!job?.installationId || !job.owner || !job.repo || !job.prNumber || !['review', 'gate'].includes(job.type)) {
       throw new Error('Invalid queue job');
