@@ -30,6 +30,22 @@ function csv(value) {
     .filter(Boolean);
 }
 
+function requiredCiAppIds(value) {
+  const result = {};
+  for (const item of csv(value)) {
+    const separator = item.lastIndexOf('=');
+    if (separator <= 0 || separator === item.length - 1) {
+      throw new Error(`Invalid REQUIRED_CI_APP_IDS entry: ${item}`);
+    }
+    const context = item.slice(0, separator).trim();
+    const appId = integer(item.slice(separator + 1), null, { min: 1 });
+    if (!context || appId === null) throw new Error(`Invalid REQUIRED_CI_APP_IDS entry: ${item}`);
+    if (Object.hasOwn(result, context)) throw new Error(`Duplicate REQUIRED_CI_APP_IDS context: ${context}`);
+    result[context] = appId;
+  }
+  return result;
+}
+
 function normalizePrivateKey(value) {
   const text = optionalString(value);
   if (!text) return null;
@@ -50,6 +66,8 @@ export function loadConfig(env = process.env) {
     id: optionalString(env.GITHUB_APP_ID),
     privateKey: normalizePrivateKey(env.GITHUB_APP_PRIVATE_KEY),
   };
+  const allowSharedAppIdentity = boolean(env.ALLOW_SHARED_APP_IDENTITY, false);
+  const reviewerFallback = allowSharedAppIdentity ? orchestrator : null;
 
   const ownerAllowlist = csv(env.OWNER_ALLOWLIST);
   const ownerPatterns = csv(env.OWNER_PATTERNS).map((pattern) => new RegExp(pattern, 'i'));
@@ -70,10 +88,13 @@ export function loadConfig(env = process.env) {
     },
     apps: {
       orchestrator,
-      openai: appCredentials(env, 'OPENAI_REVIEW', orchestrator),
-      claude: appCredentials(env, 'CLAUDE_REVIEW', orchestrator),
-      gate: appCredentials(env, 'GATE', orchestrator),
+      openai: appCredentials(env, 'OPENAI_REVIEW', reviewerFallback),
+      claude: appCredentials(env, 'CLAUDE_REVIEW', reviewerFallback),
+      gate: appCredentials(env, 'GATE', reviewerFallback),
       actions: appCredentials(env, 'ACTIONS'),
+    },
+    security: {
+      allowSharedAppIdentity,
     },
     providers: {
       openai: {
@@ -97,6 +118,7 @@ export function loadConfig(env = process.env) {
       maxFindings: integer(env.MAX_FINDINGS, DEFAULTS.maxFindings, { min: 1, max: 50 }),
       timeoutMs: integer(env.REVIEW_TIMEOUT_MS, DEFAULTS.reviewTimeoutMs, { min: 5_000 }),
       requiredCiContexts: csv(env.REQUIRED_CI_CONTEXTS),
+      requiredCiAppIds: requiredCiAppIds(env.REQUIRED_CI_APP_IDS),
       commentMode: optionalString(env.REVIEW_COMMENT_MODE) ?? 'summary',
       postPullRequestReview: boolean(env.POST_PULL_REQUEST_REVIEW, false),
     },
@@ -132,10 +154,44 @@ export function validateRuntimeConfig(config, { webhook = true, providers = true
   const missing = [];
   if (!config.apps.orchestrator.id) missing.push('GITHUB_APP_ID');
   if (!config.apps.orchestrator.privateKey) missing.push('GITHUB_APP_PRIVATE_KEY');
+  if (!config.apps.openai.id) missing.push('OPENAI_REVIEW_APP_ID');
+  if (!config.apps.openai.privateKey) missing.push('OPENAI_REVIEW_APP_PRIVATE_KEY');
+  if (!config.apps.claude.id) missing.push('CLAUDE_REVIEW_APP_ID');
+  if (!config.apps.claude.privateKey) missing.push('CLAUDE_REVIEW_APP_PRIVATE_KEY');
+  if (!config.apps.gate.id) missing.push('GATE_APP_ID');
+  if (!config.apps.gate.privateKey) missing.push('GATE_APP_PRIVATE_KEY');
   if (webhook && !config.github.webhookSecret) missing.push('GITHUB_WEBHOOK_SECRET');
   if (providers && !config.providers.openai.apiKey) missing.push('OPENAI_API_KEY');
   if (providers && !config.providers.anthropic.apiKey) missing.push('ANTHROPIC_API_KEY');
+  if (config.gha.mode === 'offload' && !config.gha.dispatchToken) {
+    if (!config.apps.actions.id) missing.push('ACTIONS_APP_ID');
+    if (!config.apps.actions.privateKey) missing.push('ACTIONS_APP_PRIVATE_KEY');
+  }
   if (missing.length) throw new Error(`Missing required configuration: ${missing.join(', ')}`);
+
+  if (!config.security?.allowSharedAppIdentity) {
+    const identities = [
+      ['orchestrator', config.apps.orchestrator.id],
+      ['openai', config.apps.openai.id],
+      ['claude', config.apps.claude.id],
+      ['gate', config.apps.gate.id],
+    ];
+    const seen = new Map();
+    for (const [role, id] of identities) {
+      const normalized = String(id);
+      const previous = seen.get(normalized);
+      if (previous) {
+        throw new Error(`GitHub App identities must be distinct: ${previous} and ${role} both use App ID ${normalized}`);
+      }
+      seen.set(normalized, role);
+    }
+  }
+
+  for (const context of Object.keys(config.review.requiredCiAppIds ?? {})) {
+    if (!config.review.requiredCiContexts.includes(context)) {
+      throw new Error(`REQUIRED_CI_APP_IDS context is not required by REQUIRED_CI_CONTEXTS: ${context}`);
+    }
+  }
 }
 
 export function ownerIsAllowed(config, owner) {

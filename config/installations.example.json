@@ -1,0 +1,77 @@
+{
+  "$schema": "./installations.schema.json",
+  "version": 1,
+  "centralRepository": "ORESoftware/ores-gh-bots",
+  "fleetAccounts": [
+    "replace-with-org-login"
+  ],
+  "apps": {
+    "orchestrator": {
+      "appId": null,
+      "slug": "replace-with-orchestrator-app-slug",
+      "visibility": "public-unlisted",
+      "installations": [
+        {
+          "account": "replace-with-org-login",
+          "installationId": null,
+          "repositorySelection": "all",
+          "repositories": []
+        }
+      ]
+    },
+    "openai": {
+      "appId": null,
+      "slug": "replace-with-openai-reviewer-app-slug",
+      "visibility": "public-unlisted",
+      "installations": [
+        {
+          "account": "replace-with-org-login",
+          "installationId": null,
+          "repositorySelection": "all",
+          "repositories": []
+        }
+      ]
+    },
+    "claude": {
+      "appId": null,
+      "slug": "replace-with-claude-reviewer-app-slug",
+      "visibility": "public-unlisted",
+      "installations": [
+        {
+          "account": "replace-with-org-login",
+          "installationId": null,
+          "repositorySelection": "all",
+          "repositories": []
+        }
+      ]
+    },
+    "gate": {
+      "appId": null,
+      "slug": "replace-with-review-gate-app-slug",
+      "visibility": "public-unlisted",
+      "installations": [
+        {
+          "account": "replace-with-org-login",
+          "installationId": null,
+          "repositorySelection": "all",
+          "repositories": []
+        }
+      ]
+    },
+    "actions": {
+      "appId": null,
+      "slug": "replace-with-actions-dispatcher-app-slug",
+      "visibility": "private",
+      "installations": [
+        {
+          "account": "ORESoftware",
+          "installationId": null,
+          "repositorySelection": "selected",
+          "repositories": [
+            "ORESoftware/ores-gh-bots"
+          ]
+        }
+      ]
+    }
+  }
+}

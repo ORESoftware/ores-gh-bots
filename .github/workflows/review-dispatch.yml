@@ -58,6 +58,12 @@ jobs:
         run: npm run check
       - name: Review exact pull-request head
         env:
+          REVIEW_OWNER: ${{ inputs.owner }}
+          REVIEW_REPO: ${{ inputs.repo }}
+          REVIEW_PR_NUMBER: ${{ inputs.pr_number }}
+          REVIEW_HEAD_SHA: ${{ inputs.head_sha }}
+          REVIEW_INSTALLATION_ID: ${{ inputs.installation_id }}
+          REVIEW_REASON: ${{ inputs.reason }}
           OWNER_ALLOWLIST: ${{ inputs.owner }}
           GITHUB_APP_ID: ${{ secrets.ORCHESTRATOR_APP_ID }}
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}
@@ -72,11 +78,4 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL || 'claude-sonnet-4-5' }}
           REQUIRED_CI_CONTEXTS: ${{ vars.REQUIRED_CI_CONTEXTS }}
-        run: >-
-          node apps/runner/src/main.mjs
-          --owner "${{ inputs.owner }}"
-          --repo "${{ inputs.repo }}"
-          --pr-number "${{ inputs.pr_number }}"
-          --head-sha "${{ inputs.head_sha }}"
-          --installation-id "${{ inputs.installation_id }}"
-          --reason "${{ inputs.reason }}"
+        run: node apps/runner/src/main.mjs
