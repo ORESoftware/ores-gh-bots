@@ -35,6 +35,7 @@ function linkNext(header) {
 export class GitHubClient {
   constructor({ apiBaseUrl = 'https://api.github.com', apiVersion = '2026-03-10', userAgent = 'ores-gh-bots/0.1.0', fetchImpl = fetch } = {}) {
     this.apiBaseUrl = apiBaseUrl.replace(/\/$/, '');
+    this.apiOrigin = new URL(this.apiBaseUrl).origin;
     this.apiVersion = apiVersion;
     this.userAgent = userAgent;
     this.fetchImpl = fetchImpl;
@@ -42,6 +43,10 @@ export class GitHubClient {
 
   async request(method, path, { token, body, headers = {}, accept = 'application/vnd.github+json', raw = false, retries = 2, signal } = {}) {
     const url = /^https?:\/\//.test(path) ? path : `${this.apiBaseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
+    const parsedUrl = new URL(url);
+    if (parsedUrl.origin !== this.apiOrigin) {
+      throw new Error(`Refusing to send GitHub credentials to a different origin: ${parsedUrl.origin}`);
+    }
     const requestHeaders = {
       accept,
       'user-agent': this.userAgent,

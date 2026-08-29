@@ -18,7 +18,7 @@
 
 ## Rotation
 
-Rotate App private keys, webhook secrets, provider credentials, and any temporary admin token independently. The service caches installation tokens only in memory and refreshes them before expiration.
+Follow `docs/SECRET_OPERATIONS.md`. App private keys rotate on the same App ID with an overlap window: deploy and verify the replacement key before revoking the old key. Keep the persistent queue path unchanged so pending work survives credential and pod rotation. The service caches installation tokens only in memory and refreshes them before expiration.
 
 ## Rollback
 

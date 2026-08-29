@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ORESoftware/ores-gh-bots/blob/main/config/installations.schema.json",
+  "title": "ORES GitHub App installation inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "centralRepository",
+    "fleetAccounts",
+    "apps"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1
+    },
+    "centralRepository": {
+      "type": "string",
+      "pattern": "^[^/]+/[^/]+$"
+    },
+    "fleetAccounts": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "apps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "orchestrator",
+        "openai",
+        "claude",
+        "gate",
+        "actions"
+      ],
+      "properties": {
+        "orchestrator": {
+          "$ref": "#/$defs/app"
+        },
+        "openai": {
+          "$ref": "#/$defs/app"
+        },
+        "claude": {
+          "$ref": "#/$defs/app"
+        },
+        "gate": {
+          "$ref": "#/$defs/app"
+        },
+        "actions": {
+          "$ref": "#/$defs/app"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nullablePositiveInteger": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "appId",
+        "slug",
+        "visibility",
+        "installations"
+      ],
+      "properties": {
+        "appId": {
+          "$ref": "#/$defs/nullablePositiveInteger"
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "visibility": {
+          "enum": [
+            "public-unlisted",
+            "private"
+          ]
+        },
+        "installations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/installation"
+          }
+        }
+      }
+    },
+    "installation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "account",
+        "installationId",
+        "repositorySelection",
+        "repositories"
+      ],
+      "properties": {
+        "account": {
+          "type": "string",
+          "minLength": 1
+        },
+        "installationId": {
+          "$ref": "#/$defs/nullablePositiveInteger"
+        },
+        "repositorySelection": {
+          "enum": [
+            "all",
+            "selected"
+          ]
+        },
+        "repositories": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[^/]+/[^/]+$"
+          }
+        }
+      }
+    }
+  }
+}
