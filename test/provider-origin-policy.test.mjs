@@ -29,11 +29,13 @@ test('arbitrary provider origins fail closed', () => {
 });
 
 test('provider base URLs must use HTTPS even when explicitly allowlisted', () => {
-  const config = loadConfig(env({
-    OPENAI_BASE_URL: 'http://proxy.example',
-    PROVIDER_ALLOWED_ORIGINS: 'http://proxy.example,https://api.anthropic.com',
-  }));
-  assert.throws(() => validateRuntimeConfig(config), /PROVIDER_ALLOWED_ORIGINS entries must be credential-free HTTPS origins/);
+  assert.throws(
+    () => loadConfig(env({
+      OPENAI_BASE_URL: 'http://proxy.example',
+      PROVIDER_ALLOWED_ORIGINS: 'http://proxy.example,https://api.anthropic.com',
+    })),
+    /PROVIDER_ALLOWED_ORIGINS entries must be credential-free HTTPS origins/,
+  );
 });
 
 test('custom HTTPS provider proxy requires explicit origin allowlisting', () => {
