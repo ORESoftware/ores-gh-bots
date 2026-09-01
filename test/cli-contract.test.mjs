@@ -14,7 +14,7 @@ test('repository-root flags-2-env contract audits cleanly', () => {
   });
 });
 
-test('flags-2-env resolves typed server and exact-review inputs', () => {
+test('flags-2-env resolves typed server, exact-review, and canary inputs', () => {
   const server = resolveCli(['node', 'orchestrator', '--port', '9090', '--worker-only'], { env: {} });
   assert.equal(server.values.PORT, 9090);
   assert.equal(server.values.ORES_WORKER_ONLY, true);
@@ -36,6 +36,20 @@ test('flags-2-env resolves typed server and exact-review inputs', () => {
   assert.equal(review.values.REVIEW_PR_NUMBER, 9);
   assert.equal(review.values.REVIEW_REASON, 'one-shot-runner');
   assert.equal(review.values.REVIEW_TYPE, 'review');
+
+  const canary = resolveCli([
+    'node',
+    'cli',
+    'canary',
+    'verify',
+    '--evidence',
+    'result/canary.json',
+    '--expected-digest',
+    'b'.repeat(64),
+  ], { env: {} });
+  assert.equal(canary.command, 'canary verify');
+  assert.equal(canary.values.ORES_CANARY_EVIDENCE_PATH, 'result/canary.json');
+  assert.equal(canary.values.ORES_CANARY_EXPECTED_DIGEST, 'b'.repeat(64));
 });
 
 test('flags-2-env rejects unknown, duplicate, and invalid typed options without values in errors', () => {
@@ -69,4 +83,5 @@ test('credentials are environment-only and executable boundaries use the canonic
   assert.match(orchestrator, /if \(cli\.command\) throw/u);
   assert.match(runner, /cli\.command !== 'review'/u);
   assert.match(fleetCli, /results\.some\(\(result\) => result\.error\)\) process\.exitCode = 1/u);
+  assert.match(fleetCli, /verifyCanaryEvidence/u);
 });

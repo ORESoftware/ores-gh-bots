@@ -163,6 +163,24 @@ type = "bool"
 default = false
 help = "Continue after an individual repository update failure."
 
+[commands.canary]
+help = "Verify exact-SHA test-owner activation evidence."
+
+[commands.canary.commands.verify]
+help = "Validate and digest a redacted dual-review canary evidence artifact."
+
+[commands.canary.commands.verify.flags.evidence]
+env = "ORES_CANARY_EVIDENCE_PATH"
+aliases = ["evidence"]
+type = "string"
+help = "Path to a redacted ores.review-canary.v1 JSON evidence artifact."
+
+[commands.canary.commands.verify.flags.expected_digest]
+env = "ORES_CANARY_EXPECTED_DIGEST"
+aliases = ["expected-digest"]
+type = "string"
+help = "Optional reviewed SHA-256 digest that the evidence must match."
+
 [commands.form]
 help = "Create a private GitHub App manifest registration form."
 
