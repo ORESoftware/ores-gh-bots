@@ -19,6 +19,7 @@ if (cli.help) {
   cli.printHelp();
   process.exit(0);
 }
+if (cli.command) throw new Error(`Unexpected command for orchestrator: ${cli.command}`);
 const workerOnly = cli.values.ORES_WORKER_ONLY;
 const config = loadConfig(cli.env);
 validateRuntimeConfig(config, {

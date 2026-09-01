@@ -29,6 +29,66 @@ test('deduplicates webhook deliveries and coalesces forced SHA jobs', () => {
   } finally { queue.close(); }
 });
 
+test('a forced event received during execution schedules exactly one follow-up run', () => {
+  const queue = new SqliteQueue({ path: ':memory:' });
+  try {
+    queue.enqueue(job());
+    const first = queue.claimNext('worker-1', 30_000);
+    assert.equal(first.force, false);
+
+    const rerun = queue.enqueue(job({ force: true, reason: 'edited-during-review' }));
+    assert.equal(rerun.inserted, true);
+    assert.equal(rerun.job.status, 'running');
+    assert.equal(queue.enqueue(job({ force: true, reason: 'coalesced-rerun' })).inserted, true);
+
+    assert.equal(queue.complete(first.id, 'worker-1'), true);
+    assert.equal(queue.stats().pending, 1);
+    const second = queue.claimNext('worker-2', 30_000);
+    assert.equal(second.attempts, 1);
+    assert.equal(second.reason, 'coalesced-rerun');
+    assert.equal(queue.complete(second.id, 'worker-2'), true);
+    assert.equal(queue.stats().completed, 1);
+    assert.equal(queue.stats().pending ?? 0, 0);
+  } finally { queue.close(); }
+});
+
+test('a fresh forced event survives failure or lease expiry on the final attempt', async () => {
+  for (const outcome of ['failure', 'lease-expiry']) {
+    const queue = new SqliteQueue({ path: ':memory:', maxAttempts: 1 });
+    try {
+      queue.enqueue(job({ maxAttempts: 1 }));
+      const claimed = queue.claimNext('worker-1', 1);
+      queue.enqueue(job({ force: true, reason: `rerun-after-${outcome}`, maxAttempts: 1 }));
+      if (outcome === 'failure') {
+        const failed = queue.fail(claimed, 'worker-1', 'boom');
+        assert.equal(failed.dead, false);
+        assert.equal(failed.delayMs, 0);
+      } else {
+        await sleep(5);
+      }
+      const rerun = queue.claimNext('worker-2', 30_000);
+      assert.equal(rerun.reason, `rerun-after-${outcome}`);
+      assert.equal(rerun.attempts, 1);
+    } finally { queue.close(); }
+  }
+});
+
+test('delivery de-duplication and derived jobs commit atomically', () => {
+  const queue = new SqliteQueue({ path: ':memory:' });
+  try {
+    assert.throws(
+      () => queue.acceptDelivery('atomic-1', 'pull_request', 'opened', [job(), job({ owner: 'invalid owner' })]),
+      /owner is invalid/u,
+    );
+    const retry = queue.acceptDelivery('atomic-1', 'pull_request', 'opened', [job()]);
+    assert.deepEqual(retry, { firstDelivery: true, inserted: 1 });
+    assert.deepEqual(
+      queue.acceptDelivery('atomic-1', 'pull_request', 'opened', [job()]),
+      { firstDelivery: false, inserted: 0 },
+    );
+  } finally { queue.close(); }
+});
+
 test('dedupe keys include the installation identity', () => {
   const queue = new SqliteQueue({ path: ':memory:' });
   try {

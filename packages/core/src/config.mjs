@@ -14,7 +14,7 @@ function integer(value, fallback, { min = Number.MIN_SAFE_INTEGER, max = Number.
   if (value === undefined || value === null || value === '') return fallback;
   const parsed = Number.parseInt(String(value), 10);
   if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
-    throw new Error(`Invalid integer value: ${value}`);
+    throw new Error('Invalid integer configuration value');
   }
   return parsed;
 }
@@ -24,7 +24,7 @@ function boolean(value, fallback = false) {
   const normalized = String(value).trim().toLowerCase();
   if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
-  throw new Error(`Invalid boolean value: ${value}`);
+  throw new Error('Invalid boolean configuration value');
 }
 
 function csv(value) {
@@ -39,15 +39,15 @@ function providerAllowedOrigins(value) {
   const configured = csv(value);
   const values = configured.length ? configured : DEFAULT_PROVIDER_ALLOWED_ORIGINS;
   const origins = [];
-  for (const item of values) {
+  for (const [index, item] of values.entries()) {
     let parsed;
     try {
       parsed = new URL(item);
     } catch {
-      throw new Error(`Invalid PROVIDER_ALLOWED_ORIGINS entry: ${item}`);
+      throw new Error(`PROVIDER_ALLOWED_ORIGINS entry ${index + 1} is invalid`);
     }
     if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
-      throw new Error(`PROVIDER_ALLOWED_ORIGINS entries must be credential-free HTTPS origins: ${item}`);
+      throw new Error(`PROVIDER_ALLOWED_ORIGINS entry ${index + 1} must be a credential-free HTTPS origin`);
     }
     if (!origins.includes(parsed.origin)) origins.push(parsed.origin);
   }
@@ -56,15 +56,15 @@ function providerAllowedOrigins(value) {
 
 function requiredCiAppIds(value) {
   const result = {};
-  for (const item of csv(value)) {
+  for (const [index, item] of csv(value).entries()) {
     const separator = item.lastIndexOf('=');
     if (separator <= 0 || separator === item.length - 1) {
-      throw new Error(`Invalid REQUIRED_CI_APP_IDS entry: ${item}`);
+      throw new Error(`REQUIRED_CI_APP_IDS entry ${index + 1} is invalid`);
     }
     const context = item.slice(0, separator).trim();
     const appId = integer(item.slice(separator + 1), null, { min: 1 });
-    if (!context || appId === null) throw new Error(`Invalid REQUIRED_CI_APP_IDS entry: ${item}`);
-    if (Object.hasOwn(result, context)) throw new Error(`Duplicate REQUIRED_CI_APP_IDS context: ${context}`);
+    if (!context || appId === null) throw new Error(`REQUIRED_CI_APP_IDS entry ${index + 1} is invalid`);
+    if (Object.hasOwn(result, context)) throw new Error(`REQUIRED_CI_APP_IDS entry ${index + 1} duplicates a context`);
     result[context] = appId;
   }
   return result;
@@ -109,7 +109,10 @@ export function loadConfig(env = process.env) {
   const reviewerFallback = allowSharedAppIdentity ? orchestrator : null;
 
   const ownerAllowlist = csv(env.OWNER_ALLOWLIST);
-  const ownerPatterns = csv(env.OWNER_PATTERNS).map((pattern) => new RegExp(pattern, 'i'));
+  const ownerPatterns = csv(env.OWNER_PATTERNS).map((pattern, index) => {
+    try { return new RegExp(pattern, 'i'); }
+    catch { throw new Error(`OWNER_PATTERNS entry ${index + 1} is invalid`); }
+  });
 
   return {
     server: {

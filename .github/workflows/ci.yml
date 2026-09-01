@@ -38,3 +38,5 @@ jobs:
         run: npm run check
       - name: Verify repository inventory
         run: npm run verify
+      - name: Build the pinned runtime image
+        run: docker build --pull=false --tag ores-gh-bots:${{ github.sha }} .

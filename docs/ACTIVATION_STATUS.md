@@ -24,6 +24,7 @@ Therefore the bot is not reviewing or gating fleet pull requests yet.
 - A durable reconciler repairs missed deliveries and missing current-SHA checks; the nightly reaper remains a recovery lane rather than the primary trigger.
 - GitHub Actions can run as a supplemental audit/recovery lane or an offloaded executor through a separately restricted dispatcher App.
 - Rulesets can be planned in `evaluate` mode and activated for every target branch with `--branch-mode all`.
+- Canary and production resources use disjoint Kubernetes instance selectors, and CI builds the digest-pinned base image recipe.
 
 ## External gates before activation
 

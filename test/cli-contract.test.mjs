@@ -63,4 +63,10 @@ test('credentials are environment-only and executable boundaries use the canonic
   ]) {
     assert.match(await readFile(new URL(path, import.meta.url), 'utf8'), /resolveCli/u);
   }
+  const orchestrator = await readFile(new URL('../apps/orchestrator/src/main.mjs', import.meta.url), 'utf8');
+  const runner = await readFile(new URL('../apps/runner/src/main.mjs', import.meta.url), 'utf8');
+  const fleetCli = await readFile(new URL('../apps/cli/src/main.mjs', import.meta.url), 'utf8');
+  assert.match(orchestrator, /if \(cli\.command\) throw/u);
+  assert.match(runner, /cli\.command !== 'review'/u);
+  assert.match(fleetCli, /results\.some\(\(result\) => result\.error\)\) process\.exitCode = 1/u);
 });

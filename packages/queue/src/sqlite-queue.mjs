@@ -173,6 +173,35 @@ export class SqliteQueue {
     return result.changes === 1;
   }
 
+  /**
+   * Persist delivery de-duplication and every derived job in one transaction.
+   * A transient queue failure must leave the delivery retryable by GitHub.
+   */
+  acceptDelivery(deliveryId, event, action, jobs) {
+    if (!Array.isArray(jobs)) throw new Error('jobs must be an array');
+    // Validate all jobs before marking the delivery so deterministic payload
+    // errors cannot strand a delivery with only a de-duplication record.
+    for (const job of jobs) normalizeJob(job, this.maxAttempts);
+
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const firstDelivery = this.markDelivery(deliveryId, event, action);
+      if (!firstDelivery) {
+        this.db.exec('COMMIT');
+        return { firstDelivery: false, inserted: 0 };
+      }
+      let inserted = 0;
+      for (const job of jobs) {
+        if (this.enqueue(job).inserted) inserted += 1;
+      }
+      this.db.exec('COMMIT');
+      return { firstDelivery: true, inserted };
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+  }
+
   enqueue(job) {
     const normalized = normalizeJob(job, this.maxAttempts);
     const timestamp = nowMs();
@@ -186,19 +215,19 @@ export class SqliteQueue {
       ON CONFLICT(dedupe_key) DO UPDATE SET
         installation_id = excluded.installation_id,
         reason = excluded.reason,
-        force = excluded.force,
+        force = CASE WHEN jobs.status = 'running' THEN 1 ELSE excluded.force END,
         needs_authorization = excluded.needs_authorization,
         sender = excluded.sender,
         payload_json = excluded.payload_json,
-        status = 'pending',
-        attempts = 0,
+        status = CASE WHEN jobs.status = 'running' THEN 'running' ELSE 'pending' END,
+        attempts = CASE WHEN jobs.status = 'running' THEN jobs.attempts ELSE 0 END,
         max_attempts = excluded.max_attempts,
         available_at = excluded.available_at,
-        lease_owner = NULL,
-        lease_expires_at = NULL,
-        last_error = NULL,
+        lease_owner = CASE WHEN jobs.status = 'running' THEN jobs.lease_owner ELSE NULL END,
+        lease_expires_at = CASE WHEN jobs.status = 'running' THEN jobs.lease_expires_at ELSE NULL END,
+        last_error = CASE WHEN jobs.status = 'running' THEN jobs.last_error ELSE NULL END,
         updated_at = excluded.updated_at
-      WHERE excluded.force = 1 AND jobs.status IN ('completed', 'dead')
+      WHERE excluded.force = 1 AND jobs.status IN ('running', 'completed', 'dead')
     `).run(
       key,
       normalized.type,
@@ -229,10 +258,13 @@ export class SqliteQueue {
     try {
       this.db.prepare(`
         UPDATE jobs
-        SET status = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'pending' END,
+        SET status = CASE WHEN force = 1 THEN 'pending' WHEN attempts >= max_attempts THEN 'dead' ELSE 'pending' END,
+            attempts = CASE WHEN force = 1 THEN 0 ELSE attempts END,
+            force = 0,
             lease_owner = NULL,
             lease_expires_at = NULL,
             last_error = CASE
+              WHEN force = 1 THEN last_error
               WHEN attempts >= max_attempts THEN COALESCE(last_error, 'lease expired after final attempt')
               ELSE last_error
             END,
@@ -258,7 +290,8 @@ export class SqliteQueue {
       }
       const update = this.db.prepare(`
         UPDATE jobs
-        SET status = 'running', attempts = attempts + 1, lease_owner = ?, lease_expires_at = ?, updated_at = ?
+        SET status = 'running', attempts = attempts + 1, force = 0,
+            lease_owner = ?, lease_expires_at = ?, updated_at = ?
         WHERE id = ? AND status = 'pending'
       `).run(normalizedWorkerId, timestamp + normalizedLeaseMs, timestamp, row.id);
       if (update.changes !== 1) {
@@ -291,7 +324,13 @@ export class SqliteQueue {
   complete(jobId, workerId) {
     const result = this.db.prepare(`
       UPDATE jobs
-      SET status = 'completed', lease_owner = NULL, lease_expires_at = NULL, last_error = NULL, updated_at = ?
+      SET status = CASE WHEN force = 1 THEN 'pending' ELSE 'completed' END,
+          attempts = CASE WHEN force = 1 THEN 0 ELSE attempts END,
+          force = 0,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          last_error = NULL,
+          updated_at = ?
       WHERE id = ? AND status = 'running' AND lease_owner = ?
     `).run(nowMs(), positiveInteger(jobId, 'jobId'), boundedText(workerId, 'workerId', 200));
     return result.changes === 1;
@@ -299,22 +338,33 @@ export class SqliteQueue {
 
   fail(job, workerId, error, { baseDelayMs = 2_000, maxDelayMs = 15 * 60_000 } = {}) {
     const timestamp = nowMs();
-    const dead = job.attempts >= job.maxAttempts;
+    const attemptBudgetExhausted = job.attempts >= job.maxAttempts;
     const delay = Math.min(maxDelayMs, baseDelayMs * 2 ** Math.max(0, job.attempts - 1));
     const result = this.db.prepare(`
       UPDATE jobs
-      SET status = ?, available_at = ?, lease_owner = NULL, lease_expires_at = NULL,
-          last_error = ?, updated_at = ?
+      SET status = CASE WHEN force = 1 THEN 'pending' ELSE ? END,
+          attempts = CASE WHEN force = 1 THEN 0 ELSE attempts END,
+          available_at = CASE WHEN force = 1 THEN ? ELSE ? END,
+          force = 0,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          last_error = ?,
+          updated_at = ?
       WHERE id = ? AND status = 'running' AND lease_owner = ?
     `).run(
-      dead ? 'dead' : 'pending',
-      dead ? timestamp : timestamp + delay,
+      attemptBudgetExhausted ? 'dead' : 'pending',
+      timestamp,
+      attemptBudgetExhausted ? timestamp : timestamp + delay,
       String(error).slice(0, 8_000),
       timestamp,
       positiveInteger(job.id, 'jobId'),
       boundedText(workerId, 'workerId', 200),
     );
-    return { updated: result.changes === 1, dead, delayMs: dead ? 0 : delay };
+    const updated = result.changes === 1;
+    const current = updated ? this.db.prepare('SELECT status, available_at FROM jobs WHERE id = ?').get(job.id) : null;
+    const dead = current?.status === 'dead';
+    const delayMs = updated && !dead ? Math.max(0, Number(current.available_at) - timestamp) : 0;
+    return { updated, dead, delayMs };
   }
 
   recordReview({ owner, repo, prNumber, headSha, provider, result = null, error = null, checkRunId = null }) {

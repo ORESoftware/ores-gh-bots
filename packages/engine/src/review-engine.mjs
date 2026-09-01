@@ -225,7 +225,11 @@ export class ReviewEngine {
 
     const gate = await this.publishGate({ ...job, headSha: pullRequest.head.sha }, { pullRequest: latest, orchestratorToken: access.token });
 
-    if (this.config.gha.mode === 'supplemental' && this.config.gha.dispatchToken) {
+    const supplementalDispatchConfigured = Boolean(
+      this.config.gha.dispatchToken
+      || (this.config.apps.actions.id && this.config.apps.actions.privateKey),
+    );
+    if (this.config.gha.mode === 'supplemental' && supplementalDispatchConfigured) {
       await this.#dispatchOffload(job, pullRequest).catch((error) => {
         this.logger.warn('supplemental GHA dispatch failed', { error: errorSummary(error) });
       });

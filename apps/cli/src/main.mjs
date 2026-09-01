@@ -129,6 +129,7 @@ if (group === 'manifest' && action === 'print') {
     branch_mode: values.ORES_CLI_BRANCH_MODE,
     results,
   }), null, 2));
+  if (results.some((result) => result.error)) process.exitCode = 1;
 } else {
   usage();
   process.exitCode = 2;

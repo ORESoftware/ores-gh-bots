@@ -4,6 +4,10 @@ import { readFile } from 'node:fs/promises';
 
 const dispatchPath = new URL('../.github/workflows/review-dispatch.yml', import.meta.url);
 const ciPath = new URL('../.github/workflows/ci.yml', import.meta.url);
+const canaryKustomizationPath = new URL('../deploy/kubernetes/overlays/canary/kustomization.yaml', import.meta.url);
+const productionKustomizationPath = new URL('../deploy/kubernetes/overlays/production/kustomization.yaml', import.meta.url);
+const dockerfilePath = new URL('../Dockerfile', import.meta.url);
+const composePath = new URL('../docker-compose.yml', import.meta.url);
 
 test('review dispatch keeps untrusted workflow inputs out of shell source', async () => {
   const workflow = await readFile(dispatchPath, 'utf8');
@@ -22,4 +26,21 @@ test('validation workflow does not persist the GitHub token into the checkout', 
   assert.match(workflow, /bash --noprofile --norc -euo pipefail/u);
   assert.match(workflow, /run: npm ci\s*$/mu);
   assert.doesNotMatch(workflow, /npm ci --ignore-scripts/u);
+  assert.match(workflow, /docker build --pull=false --tag ores-gh-bots:\$\{\{ github\.sha \}\}/u);
+});
+
+test('container bases are digest-pinned and canary selectors cannot overlap production', async () => {
+  const [dockerfile, compose, canary, production] = await Promise.all([
+    readFile(dockerfilePath, 'utf8'),
+    readFile(composePath, 'utf8'),
+    readFile(canaryKustomizationPath, 'utf8'),
+    readFile(productionKustomizationPath, 'utf8'),
+  ]);
+  assert.equal((dockerfile.match(/^FROM .*@sha256:[0-9a-f]{64}/gmu) ?? []).length, 2);
+  assert.match(compose, /env_file: env\/dec\/review-bots\.env/u);
+  assert.doesNotMatch(compose, /env_file: \.env/u);
+  assert.match(canary, /app\.kubernetes\.io\/instance: canary/u);
+  assert.match(production, /app\.kubernetes\.io\/instance: production/u);
+  assert.match(canary, /includeSelectors: true/u);
+  assert.match(production, /includeSelectors: true/u);
 });

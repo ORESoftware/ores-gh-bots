@@ -20,6 +20,14 @@ test('ruleset includes three SHA-scoped check contexts', () => {
   assert.deepEqual(required.map((item) => item.context), [CHECK_NAMES.openai, CHECK_NAMES.claude, CHECK_NAMES.gate]);
   assert.deepEqual(required.map((item) => item.integration_id), [1, 2, 3]);
   assert.deepEqual(payload.conditions.ref_name.include, ['refs/heads/**']);
+  assert.throws(
+    () => buildRulesetPayload({ enforcement: 'active', branchMode: 'all', appIds: { openai: 1, claude: 2 } }),
+    /positive gate GitHub App ID/u,
+  );
+  assert.throws(
+    () => buildRulesetPayload({ enforcement: 'active', branchMode: 'all', appIds: { openai: 1, claude: 1, gate: 3 } }),
+    /must be distinct/u,
+  );
 });
 
 test('check external IDs are deterministic and role-bound', () => {

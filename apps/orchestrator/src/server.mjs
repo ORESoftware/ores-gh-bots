@@ -112,21 +112,28 @@ export function createWebhookServer({ config, queue, logger, metrics, readiness 
         return json(response, 403, { error: 'owner_not_allowed' });
       }
 
-      const firstDelivery = queue.markDelivery(deliveryId, event, payload.action ?? null);
-      if (!firstDelivery) {
+      const jobs = routeWebhookEvent({ event, payload, policy: eventPolicy });
+      const accepted = queue.acceptDelivery(deliveryId, event, payload.action ?? null, jobs);
+      if (!accepted.firstDelivery) {
         metrics.increment('ores_webhooks_duplicate_total', { event });
         return json(response, 202, { accepted: true, duplicate: true, jobs: 0 });
       }
 
-      const jobs = routeWebhookEvent({ event, payload, policy: eventPolicy });
-      let inserted = 0;
-      for (const job of jobs) {
-        if (queue.enqueue(job).inserted) inserted += 1;
-      }
       metrics.increment('ores_webhooks_total', { event, action: payload.action ?? 'none' });
-      metrics.increment('ores_jobs_enqueued_total', { event }, inserted);
-      logger.info('accepted webhook', { event, action: payload.action, deliveryId, jobs: jobs.length, inserted });
-      return json(response, 202, { accepted: true, duplicate: false, jobs: jobs.length, inserted });
+      metrics.increment('ores_jobs_enqueued_total', { event }, accepted.inserted);
+      logger.info('accepted webhook', {
+        event,
+        action: payload.action,
+        deliveryId,
+        jobs: jobs.length,
+        inserted: accepted.inserted,
+      });
+      return json(response, 202, {
+        accepted: true,
+        duplicate: false,
+        jobs: jobs.length,
+        inserted: accepted.inserted,
+      });
     } catch (error) {
       const status = Number(error.statusCode) || 500;
       metrics.increment('ores_http_errors_total', { status });

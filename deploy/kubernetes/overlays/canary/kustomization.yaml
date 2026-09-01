@@ -3,6 +3,11 @@ kind: Kustomization
 resources:
   - ../../base
 nameSuffix: -canary
+labels:
+  - pairs:
+      app.kubernetes.io/instance: canary
+    includeSelectors: true
+    includeTemplates: true
 patches:
   - target:
       kind: ConfigMap

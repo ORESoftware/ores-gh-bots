@@ -34,7 +34,7 @@ test('provider base URLs must use HTTPS even when explicitly allowlisted', () =>
       OPENAI_BASE_URL: 'http://proxy.example',
       PROVIDER_ALLOWED_ORIGINS: 'http://proxy.example,https://api.anthropic.com',
     })),
-    /PROVIDER_ALLOWED_ORIGINS entries must be credential-free HTTPS origins/,
+    /PROVIDER_ALLOWED_ORIGINS entry 1 must be a credential-free HTTPS origin/,
   );
 });
 
@@ -61,10 +61,10 @@ test('provider base URLs reject embedded credentials and query material', () => 
 test('provider allowlist accepts origins only, not paths or credentials', () => {
   assert.throws(
     () => loadConfig(env({ PROVIDER_ALLOWED_ORIGINS: 'https://proxy.example/path' })),
-    /entries must be credential-free HTTPS origins/,
+    /entry 1 must be a credential-free HTTPS origin/,
   );
   assert.throws(
     () => loadConfig(env({ PROVIDER_ALLOWED_ORIGINS: 'https://user:pass@proxy.example' })),
-    /entries must be credential-free HTTPS origins/,
+    /entry 1 must be a credential-free HTTPS origin/,
   );
 });

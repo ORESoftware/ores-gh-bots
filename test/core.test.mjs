@@ -261,6 +261,22 @@ test('provider defaults select current pinned review models', () => {
   assert.equal(config.providers.anthropic.maxTokens, 16_000);
 });
 
+test('configuration failures do not echo rejected environment values', () => {
+  const rejected = 'sensitive-value-must-not-be-logged';
+  for (const env of [
+    { PORT: rejected },
+    { RECONCILE_ENABLED: rejected },
+    { PROVIDER_ALLOWED_ORIGINS: rejected },
+    { REQUIRED_CI_APP_IDS: rejected },
+    { OWNER_PATTERNS: '[' + rejected },
+  ]) {
+    assert.throws(
+      () => loadConfig(env),
+      (error) => !error.message.includes(rejected),
+    );
+  }
+});
+
 test('owner allowlist fails closed', () => {
   const config = loadConfig({ OWNER_ALLOWLIST: 'ORESoftware', OWNER_PATTERNS: '.*-test$' });
   assert.equal(ownerIsAllowed(config, 'ORESoftware'), true);

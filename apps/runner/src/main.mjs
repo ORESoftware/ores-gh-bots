@@ -33,7 +33,7 @@ if (cli.help) {
   cli.printHelp();
   process.exit(0);
 }
-if (cli.command && cli.command !== 'review') throw new Error(`Unexpected command: ${cli.command}`);
+if (cli.command !== 'review') throw new Error('Runner requires the review command');
 const owner = bounded(cli.env.REVIEW_OWNER, 'owner', /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,98}[A-Za-z0-9])?$/u, 100);
 const repo = bounded(cli.env.REVIEW_REPO, 'repo', /^[A-Za-z0-9_.-]+$/u, 100);
 const prNumber = positiveInteger(cli.values.REVIEW_PR_NUMBER ?? cli.env.REVIEW_PR_NUMBER, 'pr-number');

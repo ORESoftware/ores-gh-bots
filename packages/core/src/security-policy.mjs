@@ -34,7 +34,7 @@ export function validateControlPlaneConfig(config, { webhook = true } = {}) {
   }
 
   if (!['disabled', 'supplemental', 'offload'].includes(config.gha?.mode)) {
-    errors.push(`GHA_MODE must be disabled, supplemental, or offload; received ${config.gha?.mode ?? '<missing>'}`);
+    errors.push('GHA_MODE must be disabled, supplemental, or offload');
   }
 
   const requiredContexts = config.review?.requiredCiContexts ?? [];
