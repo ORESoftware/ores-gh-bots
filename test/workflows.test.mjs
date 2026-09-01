@@ -20,4 +20,6 @@ test('validation workflow does not persist the GitHub token into the checkout', 
   const workflow = await readFile(ciPath, 'utf8');
   assert.match(workflow, /persist-credentials: false/u);
   assert.match(workflow, /bash --noprofile --norc -euo pipefail/u);
+  assert.match(workflow, /run: npm ci\s*$/mu);
+  assert.doesNotMatch(workflow, /npm ci --ignore-scripts/u);
 });

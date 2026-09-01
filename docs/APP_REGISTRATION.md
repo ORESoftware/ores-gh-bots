@@ -17,15 +17,17 @@ A private GitHub App can only be installed on the account that owns it. The four
 ## Manifest bootstrap
 
 1. Enter the repository tool shell with `nix develop`. Keep shell tracing disabled for all registration and conversion commands.
-2. Create a registration form and a separate private callback-state record for each role. The orchestrator requires the deployed HTTPS base URL:
+2. Create a registration form and a separate private callback-state record for each role. All five forms require the deployed HTTPS base URL for the one-time manifest conversion callback; the orchestrator also derives its webhook URL from that base:
 
    ```sh
-   just app-form orchestrator ORESoftware https://bots.example.internal /tmp/orchestrator.html /tmp/orchestrator.state.json
-   just app-form openai ORESoftware https://bots.example.internal /tmp/openai.html /tmp/openai.state.json
-   just app-form claude ORESoftware https://bots.example.internal /tmp/claude.html /tmp/claude.state.json
-   just app-form gate ORESoftware https://bots.example.internal /tmp/gate.html /tmp/gate.state.json
-   just app-form actions ORESoftware https://bots.example.internal /tmp/actions.html /tmp/actions.state.json
+   just app-form orchestrator ORESoftware https://bots.example.internal user /tmp/orchestrator.html /tmp/orchestrator.state.json
+   just app-form openai ORESoftware https://bots.example.internal user /tmp/openai.html /tmp/openai.state.json
+   just app-form claude ORESoftware https://bots.example.internal user /tmp/claude.html /tmp/claude.state.json
+   just app-form gate ORESoftware https://bots.example.internal user /tmp/gate.html /tmp/gate.state.json
+   just app-form actions ORESoftware https://bots.example.internal user /tmp/actions.html /tmp/actions.state.json
    ```
+
+   `ORESoftware` is a GitHub user account, so these forms explicitly target the user-owned App registration endpoint. To register Apps under an organization instead, pass `organization` as the fourth argument. The helper rejects any other owner type.
 
    Both files are written with mode `0600`. The random state is stored only in the state record and is not printed.
 3. Open each local form, inspect the permissions GitHub displays, and create the App. GitHub redirects to the configured callback with one-time `code` and `state` query values.

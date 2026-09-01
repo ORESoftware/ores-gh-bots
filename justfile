@@ -56,8 +56,8 @@ rotate-age:
   sops rotate -i {{encrypted_env}}
   sops --decrypt --input-type dotenv --output-type dotenv {{encrypted_env}} >/dev/null
 
-app-form role owner base_url output="/tmp/ores-gh-app.html" state_file="/tmp/ores-gh-app.state.json":
-  node scripts/app-manifest.mjs form --role "{{role}}" --owner "{{owner}}" --base-url "{{base_url}}" --output "{{output}}" --state-file "{{state_file}}"
+app-form role owner base_url owner_type="user" output="/tmp/ores-gh-app.html" state_file="/tmp/ores-gh-app.state.json":
+  node scripts/app-manifest.mjs form --role "{{role}}" --owner "{{owner}}" --owner-type "{{owner_type}}" --base-url "{{base_url}}" --output "{{output}}" --state-file "{{state_file}}"
 
 app-convert role state_file:
   test -n "${GITHUB_MANIFEST_CODE:-}" || { echo "Set GITHUB_MANIFEST_CODE without placing it in command history." >&2; exit 2; }

@@ -56,8 +56,8 @@ jobs:
         with:
           node-version: '22.16.0'
           cache: npm
-      - name: Install exact lockfile
-        run: npm ci --ignore-scripts
+      - name: Install exact lockfile and build the pinned flags-2-env binding
+        run: npm ci
       - name: Validate trusted reviewer source
         run: npm run check
       - name: Review exact pull-request head
@@ -79,9 +79,9 @@ jobs:
           GATE_APP_ID: ${{ secrets.GATE_APP_ID }}
           GATE_APP_PRIVATE_KEY: ${{ secrets.GATE_APP_PRIVATE_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-mini' }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5.6-sol' }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL || 'claude-sonnet-4-5' }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL || 'claude-sonnet-5' }}
           REQUIRED_CI_CONTEXTS: ${{ vars.REQUIRED_CI_CONTEXTS }}
           REQUIRED_CI_APP_IDS: ${{ vars.REQUIRED_CI_APP_IDS }}
-        run: node apps/runner/src/main.mjs
+        run: node apps/runner/src/main.mjs review

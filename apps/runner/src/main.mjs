@@ -6,41 +6,12 @@ import {
   Metrics,
   ownerIsAllowed,
   redactObject,
+  resolveCli,
   validateControlPlaneConfig,
   validateRuntimeConfig,
 } from '../../../packages/core/src/index.mjs';
 import { SqliteQueue } from '../../../packages/queue/src/index.mjs';
 import { ReviewEngine } from '../../../packages/engine/src/index.mjs';
-
-const ALLOWED_ARGUMENTS = new Set([
-  'owner',
-  'repo',
-  'pr-number',
-  'head-sha',
-  'installation-id',
-  'reason',
-  'type',
-]);
-
-function args(argv) {
-  const output = {};
-  for (let index = 0; index < argv.length; index += 1) {
-    const item = argv[index];
-    if (!item.startsWith('--')) throw new Error(`Unexpected positional argument: ${item}`);
-    const separator = item.indexOf('=');
-    const key = separator === -1 ? item.slice(2) : item.slice(2, separator);
-    if (!ALLOWED_ARGUMENTS.has(key)) throw new Error(`Unknown argument: --${key}`);
-    if (Object.hasOwn(output, key)) throw new Error(`Duplicate argument: --${key}`);
-    let value = separator === -1 ? null : item.slice(separator + 1);
-    if (value === null) {
-      value = argv[index + 1];
-      if (value === undefined || value.startsWith('--')) throw new Error(`Missing value for --${key}`);
-      index += 1;
-    }
-    output[key] = value;
-  }
-  return output;
-}
 
 function positiveInteger(value, field, { optional = false } = {}) {
   if (optional && (value === undefined || value === null || value === '')) return 0;
@@ -57,26 +28,31 @@ function bounded(value, field, pattern, maxLength) {
   return text;
 }
 
-const input = args(process.argv.slice(2));
-const owner = bounded(input.owner ?? process.env.REVIEW_OWNER, 'owner', /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,98}[A-Za-z0-9])?$/u, 100);
-const repo = bounded(input.repo ?? process.env.REVIEW_REPO, 'repo', /^[A-Za-z0-9_.-]+$/u, 100);
-const prNumber = positiveInteger(input['pr-number'] ?? process.env.REVIEW_PR_NUMBER, 'pr-number');
-const headSha = bounded(input['head-sha'] ?? process.env.REVIEW_HEAD_SHA, 'head-sha', /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/u, 64);
+const cli = resolveCli();
+if (cli.help) {
+  cli.printHelp();
+  process.exit(0);
+}
+if (cli.command && cli.command !== 'review') throw new Error(`Unexpected command: ${cli.command}`);
+const owner = bounded(cli.env.REVIEW_OWNER, 'owner', /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,98}[A-Za-z0-9])?$/u, 100);
+const repo = bounded(cli.env.REVIEW_REPO, 'repo', /^[A-Za-z0-9_.-]+$/u, 100);
+const prNumber = positiveInteger(cli.values.REVIEW_PR_NUMBER ?? cli.env.REVIEW_PR_NUMBER, 'pr-number');
+const headSha = bounded(cli.env.REVIEW_HEAD_SHA, 'head-sha', /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/u, 64);
 let installationId = positiveInteger(
-  input['installation-id'] ?? process.env.REVIEW_INSTALLATION_ID,
+  cli.values.REVIEW_INSTALLATION_ID ?? cli.env.REVIEW_INSTALLATION_ID,
   'installation-id',
   { optional: true },
 );
 const reason = bounded(
-  input.reason ?? process.env.REVIEW_REASON ?? 'one-shot-runner',
+  cli.env.REVIEW_REASON,
   'reason',
   /^[^\0\r\n]+$/u,
   256,
 );
-const type = input.type ?? process.env.REVIEW_TYPE ?? 'review';
+const type = cli.env.REVIEW_TYPE;
 if (!['review', 'gate'].includes(type)) throw new Error('type must be review or gate');
 
-const config = loadConfig({ ...process.env, QUEUE_PATH: ':memory:', GHA_MODE: 'disabled' });
+const config = loadConfig({ ...cli.env, QUEUE_PATH: ':memory:', GHA_MODE: 'disabled' });
 validateRuntimeConfig(config, { webhook: false, providers: true });
 validateControlPlaneConfig(config, { webhook: false });
 if (!ownerIsAllowed(config, owner)) throw new Error(`owner is not allowed by runtime policy: ${owner}`);

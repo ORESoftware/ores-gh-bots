@@ -1,7 +1,14 @@
+FROM node:22.16.0-bookworm AS build
+WORKDIR /app
+ENV NODE_ENV=production
+COPY . .
+RUN npm ci --omit=dev
+
 FROM node:22.16.0-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-COPY package.json ./
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --chown=node:node package.json package-lock.json .cli-flags.toml ./
 COPY apps ./apps
 COPY packages ./packages
 COPY scripts ./scripts

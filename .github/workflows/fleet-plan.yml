@@ -21,7 +21,8 @@ jobs:
         with:
           node-version: '22.16.0'
           cache: npm
-      - run: npm ci --ignore-scripts
+      - name: Install exact lockfile and build the pinned flags-2-env binding
+        run: npm ci
       - name: Generate a no-write ruleset plan
         env:
           OWNER_ALLOWLIST: ${{ vars.OWNER_ALLOWLIST }}

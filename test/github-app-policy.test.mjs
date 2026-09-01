@@ -26,6 +26,16 @@ test('webhook subscription drift is rejected', () => {
   assert.match(validatePolicyDocuments(documents).join('\n'), /orchestrator: event drift/u);
 });
 
+test('every manifest keeps an HTTPS conversion callback without adding reviewer webhooks', () => {
+  const missingRedirect = structuredClone(baseline);
+  delete missingRedirect.manifests.openai.redirect_url;
+  assert.match(validatePolicyDocuments(missingRedirect).join('\n'), /openai: manifest redirect URL must be valid/u);
+
+  const reviewerWebhook = structuredClone(baseline);
+  reviewerWebhook.manifests.openai.hook_attributes = { active: true, url: 'https://example.test/webhook' };
+  assert.match(validatePolicyDocuments(reviewerWebhook).join('\n'), /openai: non-webhook App must not configure a webhook/u);
+});
+
 test('review identities must remain public-unlisted for fleet installation', () => {
   const documents = structuredClone(baseline);
   documents.manifests.claude.public = false;

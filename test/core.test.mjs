@@ -253,6 +253,14 @@ test('runtime and control-plane config require independent pinned identities', (
   })));
 });
 
+test('provider defaults select current pinned review models', () => {
+  const config = loadConfig({});
+  assert.equal(config.providers.openai.model, 'gpt-5.6-sol');
+  assert.equal(config.providers.openai.maxOutputTokens, 16_000);
+  assert.equal(config.providers.anthropic.model, 'claude-sonnet-5');
+  assert.equal(config.providers.anthropic.maxTokens, 16_000);
+});
+
 test('owner allowlist fails closed', () => {
   const config = loadConfig({ OWNER_ALLOWLIST: 'ORESoftware', OWNER_PATTERNS: '.*-test$' });
   assert.equal(ownerIsAllowed(config, 'ORESoftware'), true);

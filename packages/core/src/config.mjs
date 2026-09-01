@@ -140,14 +140,14 @@ export function loadConfig(env = process.env) {
       openai: {
         apiKey: optionalString(env.OPENAI_API_KEY),
         baseUrl: optionalString(env.OPENAI_BASE_URL) ?? 'https://api.openai.com',
-        model: optionalString(env.OPENAI_MODEL) ?? 'gpt-5-mini',
-        maxOutputTokens: integer(env.OPENAI_MAX_OUTPUT_TOKENS, 8_000, { min: 256 }),
+        model: optionalString(env.OPENAI_MODEL) ?? 'gpt-5.6-sol',
+        maxOutputTokens: integer(env.OPENAI_MAX_OUTPUT_TOKENS, 16_000, { min: 256 }),
       },
       anthropic: {
         apiKey: optionalString(env.ANTHROPIC_API_KEY),
         baseUrl: optionalString(env.ANTHROPIC_BASE_URL) ?? 'https://api.anthropic.com',
-        model: optionalString(env.ANTHROPIC_MODEL) ?? 'claude-sonnet-4-5',
-        maxTokens: integer(env.ANTHROPIC_MAX_TOKENS, 8_000, { min: 256 }),
+        model: optionalString(env.ANTHROPIC_MODEL) ?? 'claude-sonnet-5',
+        maxTokens: integer(env.ANTHROPIC_MAX_TOKENS, 16_000, { min: 256 }),
         version: optionalString(env.ANTHROPIC_VERSION) ?? '2023-06-01',
       },
     },

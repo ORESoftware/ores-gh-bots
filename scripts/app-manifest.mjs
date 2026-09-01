@@ -3,25 +3,30 @@ import { chmod, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadPolicyDocuments } from './lib/github-app-policy.mjs';
+import { resolveCli } from '../packages/core/src/cli.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const modulePath = fileURLToPath(import.meta.url);
 const defaultStateMaxAgeMs = 2 * 60 * 60 * 1_000;
 
 export function parseOptions(argv) {
-  const command = argv[0];
+  const cli = resolveCli([process.execPath, modulePath, ...argv], { env: {} });
+  if (cli.help) return { command: cli.command, options: {}, help: cli };
   const options = {};
-  for (let index = 1; index < argv.length; index += 1) {
-    const flag = argv[index];
-    if (!flag.startsWith('--')) throw new Error(`Unexpected argument: ${flag}`);
-    const key = flag.slice(2);
-    const value = argv[index + 1];
-    if (!value || value.startsWith('--')) throw new Error(`Missing value for ${flag}`);
-    if (Object.hasOwn(options, key)) throw new Error(`Duplicate option: ${flag}`);
-    options[key] = value;
-    index += 1;
+  const mapping = {
+    role: 'ORES_APP_ROLE',
+    owner: 'ORES_APP_OWNER',
+    'owner-type': 'ORES_APP_OWNER_TYPE',
+    'base-url': 'ORES_APP_BASE_URL',
+    output: 'ORES_APP_OUTPUT',
+    'state-file': 'ORES_APP_STATE_FILE',
+    'code-file': 'ORES_APP_CODE_FILE',
+    'callback-state-file': 'ORES_APP_CALLBACK_STATE_FILE',
+  };
+  for (const [option, envName] of Object.entries(mapping)) {
+    if (cli.env[envName] !== undefined) options[option] = cli.env[envName];
   }
-  return { command, options };
+  return { command: cli.command, options, help: null };
 }
 
 function requireOption(options, key) {
@@ -38,8 +43,14 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;');
 }
 
-function registrationAction(owner, state) {
-  return `https://github.com/organizations/${encodeURIComponent(owner)}/settings/apps/new?state=${encodeURIComponent(state)}`;
+function registrationAction(owner, ownerType, state) {
+  if (ownerType === 'user') {
+    return `https://github.com/settings/apps/new?state=${encodeURIComponent(state)}`;
+  }
+  if (ownerType === 'organization') {
+    return `https://github.com/organizations/${encodeURIComponent(owner)}/settings/apps/new?state=${encodeURIComponent(state)}`;
+  }
+  throw new Error('--owner-type must be user or organization');
 }
 
 function withRuntimeUrls(manifest, baseUrl) {
@@ -67,6 +78,8 @@ export async function createForm(options, {
 } = {}) {
   const role = requireOption(options, 'role');
   const owner = requireOption(options, 'owner');
+  const ownerType = options['owner-type'] ?? 'user';
+  const baseUrl = requireOption(options, 'base-url');
   const output = resolve(options.output ?? `/tmp/ores-gh-app-${role}.html`);
   const stateFile = resolve(options['state-file'] ?? `${output}.state.json`);
   if (output === stateFile) throw new Error('--output and --state-file must be different paths');
@@ -74,13 +87,10 @@ export async function createForm(options, {
   const documents = await loadDocuments(root);
   const manifest = documents.manifests[role];
   if (!manifest) throw new Error(`Unknown App role: ${role}`);
-  const prepared = withRuntimeUrls(manifest, options['base-url'] ?? 'https://replace.example');
-  if (role === 'orchestrator' && !options['base-url']) {
-    throw new Error('The orchestrator form requires --base-url for its webhook and redirect URLs');
-  }
+  const prepared = withRuntimeUrls(manifest, baseUrl);
 
   const state = randomBytesImpl(32).toString('hex');
-  const action = registrationAction(owner, state);
+  const action = registrationAction(owner, ownerType, state);
   const manifestJson = JSON.stringify(prepared);
   const html = `<!doctype html>
 <html lang="en">
@@ -103,13 +113,14 @@ export async function createForm(options, {
     version: 1,
     role,
     owner,
+    ownerType,
     state,
     createdAt: now().toISOString(),
   };
 
   await writePrivateFile(output, html);
   await writePrivateFile(stateFile, `${JSON.stringify(stateRecord, null, 2)}\n`);
-  log(JSON.stringify({ role, owner, output, stateFile }, null, 2));
+  log(JSON.stringify({ role, owner, ownerType, output, stateFile }, null, 2));
 }
 
 const credentialMap = {
@@ -252,7 +263,8 @@ export async function convertManifest(options, {
 }
 
 export async function main(argv = process.argv.slice(2), dependencies = {}) {
-  const { command, options } = parseOptions(argv);
+  const { command, options, help } = parseOptions(argv);
+  if (help) return help.printHelp();
   if (command === 'form') return createForm(options, dependencies);
   if (command === 'convert') return convertManifest(options, dependencies);
   throw new Error('Usage: node scripts/app-manifest.mjs <form|convert> --role ROLE ...');

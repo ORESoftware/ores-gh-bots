@@ -25,21 +25,23 @@ test('extracts OpenAI output text', () => {
   assert.throws(() => extractOpenAIText({ output: [{ type: 'message', content: [{ type: 'refusal', refusal: 'no' }] }] }), /refused/);
 });
 
-test('Anthropic request forces exactly one review tool', () => {
+test('Anthropic request uses native structured output', () => {
   const request = buildAnthropicRequest({ model: 'claude-test', maxTokens: 1000, context });
-  assert.deepEqual(request.tool_choice, { type: 'tool', name: 'submit_code_review' });
-  assert.equal(request.disable_parallel_tool_use, true);
+  assert.equal(request.output_config.format.type, 'json_schema');
+  assert.equal(request.output_config.format.schema.type, 'object');
+  assert.equal(request.tools, undefined);
 });
 
-test('extracts the forced Anthropic tool result', () => {
+test('extracts exactly one Anthropic structured text result', () => {
   const input = { verdict: 'approve' };
-  assert.equal(extractAnthropicReview({ content: [{ type: 'tool_use', name: 'submit_code_review', input }] }), input);
-  assert.throws(() => extractAnthropicReview({ content: [], stop_reason: 'end_turn' }), /exactly once/);
+  assert.deepEqual(extractAnthropicReview({ content: [{ type: 'text', text: JSON.stringify(input) }] }), input);
+  assert.throws(() => extractAnthropicReview({ content: [], stop_reason: 'end_turn' }), /exactly one/);
   assert.throws(() => extractAnthropicReview({
     content: [
-      { type: 'tool_use', name: 'submit_code_review', input },
-      { type: 'tool_use', name: 'submit_code_review', input },
+      { type: 'text', text: JSON.stringify(input) },
+      { type: 'text', text: JSON.stringify(input) },
     ],
-    stop_reason: 'tool_use',
-  }), /exactly once/);
+    stop_reason: 'end_turn',
+  }), /exactly one/);
+  assert.throws(() => extractAnthropicReview({ content: [{ type: 'text', text: '{' }] }), /JSON was invalid/);
 });

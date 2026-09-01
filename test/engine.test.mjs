@@ -55,7 +55,10 @@ function providerFetch(url) {
     }));
   }
   if (String(url).includes('anthropic')) {
-    return Promise.resolve(new Response(JSON.stringify({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_code_review', input: approved }] }), {
+    return Promise.resolve(new Response(JSON.stringify({
+      stop_reason: 'end_turn',
+      content: [{ type: 'text', text: JSON.stringify(approved) }],
+    }), {
       status: 200, headers: { 'content-type': 'application/json' },
     }));
   }

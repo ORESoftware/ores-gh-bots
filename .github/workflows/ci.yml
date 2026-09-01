@@ -32,8 +32,8 @@ jobs:
         with:
           node-version: '22.16.0'
           cache: npm
-      - name: Verify lockfile
-        run: npm ci --ignore-scripts
+      - name: Install exact lockfile and build the pinned flags-2-env binding
+        run: npm ci
       - name: Lint and test
         run: npm run check
       - name: Verify repository inventory

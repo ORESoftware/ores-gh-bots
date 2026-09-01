@@ -4,6 +4,7 @@ import {
   createLogger,
   loadConfig,
   Metrics,
+  resolveCli,
   validateControlPlaneConfig,
   validateRuntimeConfig,
 } from '../../../packages/core/src/index.mjs';
@@ -13,8 +14,13 @@ import { Reconciler, startReconciler } from './reconciler.mjs';
 import { createWebhookServer } from './server.mjs';
 import { createWorkerPool } from './worker.mjs';
 
-const workerOnly = process.argv.includes('--worker-only');
-const config = loadConfig();
+const cli = resolveCli();
+if (cli.help) {
+  cli.printHelp();
+  process.exit(0);
+}
+const workerOnly = cli.values.ORES_WORKER_ONLY;
+const config = loadConfig(cli.env);
 validateRuntimeConfig(config, {
   webhook: !workerOnly,
   providers: config.gha.mode !== 'offload',

@@ -15,7 +15,7 @@
     "start": "node apps/orchestrator/src/main.mjs",
     "worker": "node apps/orchestrator/src/main.mjs --worker-only",
     "cli": "node apps/cli/src/main.mjs",
-    "review": "node apps/runner/src/main.mjs",
+    "review": "node apps/runner/src/main.mjs review",
     "test": "node --test --test-reporter=spec",
     "lint": "node scripts/lint.mjs",
     "check": "npm run lint && npm test",
@@ -23,5 +23,8 @@
     "verify:github-apps": "node scripts/verify-github-apps.mjs",
     "verify": "npm run verify:repository && npm run verify:github-apps"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@oresoftware/f2e": "https://codeload.github.com/ORESoftware/flags-2-env/tar.gz/5a44d6a38f06c2765e80676618fd72bf4e59b984"
+  }
 }
