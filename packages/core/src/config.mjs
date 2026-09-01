@@ -1,5 +1,10 @@
 import { DEFAULTS } from './constants.mjs';
 
+const DEFAULT_PROVIDER_ALLOWED_ORIGINS = [
+  'https://api.openai.com',
+  'https://api.anthropic.com',
+];
+
 function optionalString(value) {
   const text = String(value ?? '').trim();
   return text || null;
@@ -28,6 +33,25 @@ function csv(value) {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function providerAllowedOrigins(value) {
+  const configured = csv(value);
+  const values = configured.length ? configured : DEFAULT_PROVIDER_ALLOWED_ORIGINS;
+  const origins = [];
+  for (const item of values) {
+    let parsed;
+    try {
+      parsed = new URL(item);
+    } catch {
+      throw new Error(`Invalid PROVIDER_ALLOWED_ORIGINS entry: ${item}`);
+    }
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
+      throw new Error(`PROVIDER_ALLOWED_ORIGINS entries must be credential-free HTTPS origins: ${item}`);
+    }
+    if (!origins.includes(parsed.origin)) origins.push(parsed.origin);
+  }
+  return origins;
 }
 
 function requiredCiAppIds(value) {
@@ -59,6 +83,21 @@ function appCredentials(env, prefix, fallback = null) {
   const id = optionalString(env[`${prefix}_APP_ID`]) ?? fallback?.id ?? null;
   const privateKey = normalizePrivateKey(env[`${prefix}_APP_PRIVATE_KEY`]) ?? fallback?.privateKey ?? null;
   return { id, privateKey };
+}
+
+function validateProviderBaseUrl(name, value, allowedOrigins) {
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${name} base URL is invalid`);
+  }
+  if (parsed.protocol !== 'https:') throw new Error(`${name} base URL must use HTTPS`);
+  if (parsed.username || parsed.password) throw new Error(`${name} base URL must not contain credentials`);
+  if (parsed.search || parsed.hash) throw new Error(`${name} base URL must not contain a query string or fragment`);
+  if (!allowedOrigins.includes(parsed.origin)) {
+    throw new Error(`${name} base URL origin is not allowed: ${parsed.origin}`);
+  }
 }
 
 export function loadConfig(env = process.env) {
@@ -95,6 +134,7 @@ export function loadConfig(env = process.env) {
     },
     security: {
       allowSharedAppIdentity,
+      providerAllowedOrigins: providerAllowedOrigins(env.PROVIDER_ALLOWED_ORIGINS),
     },
     providers: {
       openai: {
@@ -168,6 +208,12 @@ export function validateRuntimeConfig(config, { webhook = true, providers = true
     if (!config.apps.actions.privateKey) missing.push('ACTIONS_APP_PRIVATE_KEY');
   }
   if (missing.length) throw new Error(`Missing required configuration: ${missing.join(', ')}`);
+
+  if (providers) {
+    const allowedOrigins = config.security?.providerAllowedOrigins ?? DEFAULT_PROVIDER_ALLOWED_ORIGINS;
+    validateProviderBaseUrl('OpenAI', config.providers.openai.baseUrl, allowedOrigins);
+    validateProviderBaseUrl('Anthropic', config.providers.anthropic.baseUrl, allowedOrigins);
+  }
 
   if (!config.security?.allowSharedAppIdentity) {
     const identities = [
