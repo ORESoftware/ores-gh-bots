@@ -36,7 +36,9 @@ jobs:
         run: node apps/cli/src/main.mjs rulesets plan --branch-mode protected > ruleset-plan.json
       - name: Add plan summary
         run: |
-          echo '## ORES ruleset plan' >> "$GITHUB_STEP_SUMMARY"
-          echo '```json' >> "$GITHUB_STEP_SUMMARY"
-          cat ruleset-plan.json >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo '## ORES ruleset plan'
+            echo '```json'
+            cat ruleset-plan.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

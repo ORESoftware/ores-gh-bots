@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { SqliteQueue } from '../packages/queue/src/index.mjs';
 
 function job(overrides = {}) {
@@ -191,4 +194,63 @@ test('prunes old deliveries, terminal jobs, and review evidence', () => {
     });
     assert.deepEqual(pruned, { deliveries: 1, jobs: 1, reviews: 1 });
   } finally { queue.close(); }
+});
+
+test('delivery, lease recovery, and exact-SHA review evidence survive a process restart', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'ores-gh-bots-queue-restart-'));
+  const path = join(directory, 'queue.sqlite');
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  const first = new SqliteQueue({ path, maxAttempts: 2 });
+  assert.deepEqual(first.acceptDelivery('restart-1', 'pull_request', 'opened', [job({ maxAttempts: 2 })]), {
+    firstDelivery: true,
+    inserted: 1,
+  });
+  first.recordReview({
+    owner: 'O', repo: 'R', prNumber: 2, headSha: 'abc', provider: 'openai',
+    result: { verdict: 'approve' }, checkRunId: 42,
+  });
+  const abandoned = first.claimNext('crashed-worker', 1);
+  assert.equal(abandoned.attempts, 1);
+  first.close();
+
+  await sleep(5);
+  const second = new SqliteQueue({ path, maxAttempts: 2 });
+  assert.deepEqual(second.acceptDelivery('restart-1', 'pull_request', 'opened', [job({ maxAttempts: 2 })]), {
+    firstDelivery: false,
+    inserted: 0,
+  });
+  assert.equal(second.getReviews({ owner: 'O', repo: 'R', prNumber: 2, headSha: 'abc' }).openai.checkRunId, 42);
+  const recovered = second.claimNext('recovery-worker', 30_000);
+  assert.equal(recovered.id, abandoned.id);
+  assert.equal(recovered.attempts, 2);
+  assert.equal(second.complete(recovered.id, 'recovery-worker'), true);
+  second.close();
+
+  const third = new SqliteQueue({ path, maxAttempts: 2 });
+  try {
+    assert.deepEqual(third.stats(), { completed: 1 });
+    assert.equal(third.getReviews({ owner: 'O', repo: 'R', prNumber: 2, headSha: 'abc' }).openai.verdict, 'approve');
+  } finally { third.close(); }
+});
+
+test('two queue connections never claim the same persisted job', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'ores-gh-bots-queue-claim-'));
+  const path = join(directory, 'queue.sqlite');
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const first = new SqliteQueue({ path });
+  const second = new SqliteQueue({ path });
+  try {
+    first.enqueue(job({ headSha: 'first' }));
+    first.enqueue(job({ headSha: 'second' }));
+    const firstClaim = first.claimNext('worker-a', 30_000);
+    const secondClaim = second.claimNext('worker-b', 30_000);
+    assert.notEqual(firstClaim.id, secondClaim.id);
+    assert.notEqual(firstClaim.headSha, secondClaim.headSha);
+    assert.equal(first.claimNext('worker-c', 30_000), null);
+    assert.equal(second.claimNext('worker-d', 30_000), null);
+  } finally {
+    second.close();
+    first.close();
+  }
 });

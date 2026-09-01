@@ -17,8 +17,9 @@
     "cli": "node apps/cli/src/main.mjs",
     "review": "node apps/runner/src/main.mjs review",
     "test": "node --test --test-reporter=spec",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='apps/**/*.mjs' --test-coverage-include='packages/**/*.mjs' --test-coverage-exclude='**/main.mjs' --test-coverage-lines=85 --test-coverage-branches=70 --test-coverage-functions=80 --test-reporter=spec",
     "lint": "node scripts/lint.mjs",
-    "check": "npm run lint && npm test",
+    "check": "npm run lint && npm run test:coverage",
     "verify:repository": "node scripts/verify-repository.mjs",
     "verify:github-apps": "node scripts/verify-github-apps.mjs",
     "verify": "npm run verify:repository && npm run verify:github-apps"
