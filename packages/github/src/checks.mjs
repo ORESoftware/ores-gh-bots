@@ -1,4 +1,5 @@
 import { CHECK_NAMES, OWN_CHECK_NAMES } from '../../core/src/constants.mjs';
+import { isSafeRepositoryPath } from '../../core/src/review-schema.mjs';
 
 function annotationLevel(severity) {
   if (['critical', 'high'].includes(severity)) return 'failure';
@@ -6,9 +7,22 @@ function annotationLevel(severity) {
   return 'notice';
 }
 
+function errorStatus(error) {
+  return Number(error?.status ?? error?.response?.status ?? 0);
+}
+
+export function checkExternalId(role, owner, repo, prNumber, headSha) {
+  if (!['openai', 'claude', 'gate'].includes(role)) throw new Error(`Invalid check role: ${role}`);
+  return `${role}:${owner}/${repo}#${prNumber}@${headSha}`;
+}
+
 export function reviewAnnotations(review) {
   return review.findings
-    .filter((finding) => finding.path && finding.line)
+    .filter((finding) => finding.path
+      && isSafeRepositoryPath(finding.path)
+      && Number.isInteger(finding.line)
+      && finding.line > 0
+      && finding.line <= 2_147_483_647)
     .slice(0, 50)
     .map((finding) => ({
       path: finding.path,
@@ -37,15 +51,38 @@ export async function updateCheckRun(client, token, owner, repo, checkRunId, inp
   return response.data;
 }
 
-export async function findLatestCheckRun(client, token, owner, repo, headSha, name, { externalId = null } = {}) {
+export async function findLatestCheckRun(
+  client,
+  token,
+  owner,
+  repo,
+  headSha,
+  name,
+  { externalId = null, appId = null } = {},
+) {
   const response = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/check-runs?check_name=${encodeURIComponent(name)}&filter=latest&per_page=100`, { token });
   return (response.data.check_runs ?? [])
     .filter((check) => externalId === null || check.external_id === externalId)
+    .filter((check) => appId === null || Number(check.app?.id) === Number(appId))
     .sort((a, b) => b.id - a.id)[0] ?? null;
 }
 
-export async function ensureInProgressCheck({ client, token, owner, repo, headSha, name, detailsUrl, externalId, summary }) {
-  const existing = await findLatestCheckRun(client, token, owner, repo, headSha, name, { externalId });
+export async function ensureInProgressCheck({
+  client,
+  token,
+  owner,
+  repo,
+  headSha,
+  name,
+  detailsUrl,
+  externalId,
+  summary,
+  expectedAppId = null,
+}) {
+  const existing = await findLatestCheckRun(client, token, owner, repo, headSha, name, {
+    externalId,
+    appId: expectedAppId,
+  });
   const payload = {
     name,
     head_sha: headSha,
@@ -63,11 +100,9 @@ export async function ensureInProgressCheck({ client, token, owner, repo, headSh
     try {
       return await updateCheckRun(client, token, owner, repo, existing.id, updatePayload);
     } catch (error) {
-      const status = Number(error?.status ?? error?.response?.status ?? 0);
-      if (![403, 404, 422].includes(status)) throw error;
-      // Another GitHub App may have created a same-name/same-external-ID check.
-      // Check runs can only be updated by the App that created them, so create
-      // an App-owned run rather than allowing the foreign run to block reviews.
+      if (![403, 404, 422].includes(errorStatus(error))) throw error;
+      // A stale or foreign check can never block creation of a run owned by the
+      // configured reviewer App. Other errors remain fail closed.
     }
   }
   return createCheckRun(client, token, owner, repo, payload);
@@ -85,7 +120,8 @@ export async function completeReviewCheck({ client, token, owner, repo, checkRun
     review.tests.length ? `\n## Suggested validation\n${review.tests.map((item) => `- ${item}`).join('\n')}` : '',
   ].join('\n').slice(0, 65_535);
 
-  return updateCheckRun(client, token, owner, repo, checkRunId, {
+  const annotations = reviewAnnotations(review);
+  const payload = {
     name,
     status: 'completed',
     conclusion,
@@ -95,14 +131,23 @@ export async function completeReviewCheck({ client, token, owner, repo, checkRun
       title: `${name}: ${review.verdict}`.slice(0, 255),
       summary: review.summary.slice(0, 65_535),
       text,
-      annotations: reviewAnnotations(review),
+      annotations,
     },
     actions: [{
       label: 'Re-review',
       description: 'Run both ORES AI reviewers again for this SHA.',
       identifier: 'rereview',
     }],
-  });
+  };
+
+  try {
+    return await updateCheckRun(client, token, owner, repo, checkRunId, payload);
+  } catch (error) {
+    if (errorStatus(error) !== 422 || annotations.length === 0) throw error;
+    const withoutAnnotations = structuredClone(payload);
+    delete withoutAnnotations.output.annotations;
+    return updateCheckRun(client, token, owner, repo, checkRunId, withoutAnnotations);
+  }
 }
 
 export async function completeFailedCheck({ client, token, owner, repo, checkRunId, name, summary, detailsUrl }) {
@@ -146,8 +191,7 @@ export async function completeGateCheck({ client, token, owner, repo, checkRunId
 
 function normalizeCheckState(check) {
   if (check.status !== 'completed') return check.status;
-  if (['success', 'neutral', 'skipped'].includes(check.conclusion)) return 'success';
-  return check.conclusion ?? 'failure';
+  return check.conclusion === 'success' ? 'success' : (check.conclusion ?? 'failure');
 }
 
 export async function getCiSnapshot(client, token, owner, repo, headSha) {
