@@ -20,22 +20,22 @@ test('HTTP ingress configuration rejects partial and non-decimal integer values'
 
 test('HTTP ingress configuration is bounded and internally consistent', () => {
   assert.throws(
-    () => loadConfig({ HEADERS_TIMEOUT_MS: '31000', REQUEST_TIMEOUT_MS: '30000' }),
+    () => loadConfig({ HTTP_HEADERS_TIMEOUT_MS: '31000', HTTP_REQUEST_TIMEOUT_MS: '30000' }),
     /must not exceed/,
   );
-  assert.throws(() => loadConfig({ MAX_HEADER_BYTES: '70000' }), /Invalid integer configuration value/);
-  assert.throws(() => loadConfig({ MAX_HEADERS_COUNT: '500' }), /Invalid integer configuration value/);
+  assert.throws(() => loadConfig({ HTTP_MAX_HEADER_BYTES: '70000' }), /Invalid integer configuration value/);
+  assert.throws(() => loadConfig({ HTTP_MAX_HEADERS_COUNT: '500' }), /Invalid integer configuration value/);
   assert.throws(() => loadConfig({ BODY_LIMIT_BYTES: '20000000' }), /Invalid integer configuration value/);
 });
 
 test('webhook server applies every configured HTTP resource budget', () => {
   const config = loadConfig({
-    HEADERS_TIMEOUT_MS: '7000',
-    REQUEST_TIMEOUT_MS: '19000',
-    KEEP_ALIVE_TIMEOUT_MS: '4000',
-    MAX_HEADER_BYTES: '12288',
-    MAX_HEADERS_COUNT: '48',
-    MAX_REQUESTS_PER_SOCKET: '25',
+    HTTP_HEADERS_TIMEOUT_MS: '7000',
+    HTTP_REQUEST_TIMEOUT_MS: '19000',
+    HTTP_KEEP_ALIVE_TIMEOUT_MS: '4000',
+    HTTP_MAX_HEADER_BYTES: '12288',
+    HTTP_MAX_HEADERS_COUNT: '48',
+    HTTP_MAX_REQUESTS_PER_SOCKET: '25',
   });
   const server = createWebhookServer({ config, ...noOpDependencies() });
   try {
