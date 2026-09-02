@@ -1,0 +1,139 @@
+name: Nightly dependency-aware PR merge reaper
+
+on:
+  schedule:
+    # GitHub schedules are UTC. The local-time gate below admits only 01:00
+    # America/Chicago, so these two entries cover both daylight and standard time.
+    - cron: '7 6 * * *'
+    - cron: '7 7 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Plan only or apply up to three exact-head merges
+        required: true
+        type: choice
+        default: plan
+        options:
+          - plan
+          - apply
+      confirm:
+        description: Required MERGE-* acknowledgement for apply mode
+        required: false
+        type: string
+      minimum_age_hours:
+        description: Minimum PR age
+        required: true
+        type: number
+        default: 55
+      max_merges:
+        description: Maximum merge effects; policy hard-caps this at three
+        required: true
+        type: number
+        default: 3
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-dependency-aware-pr-merge-reaper
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  local-time-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        name: Admit manual runs or 01:00 America/Chicago
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+
+          manual = os.environ["EVENT_NAME"] == "workflow_dispatch"
+          local = datetime.now(ZoneInfo("America/Chicago"))
+          admitted = manual or local.hour == 1
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"run={'true' if admitted else 'false'}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(f"Local time: `{local.isoformat()}`; admitted: `{admitted}`.\n")
+          PY
+
+  reap:
+    needs: local-time-gate
+    if: needs.local-time-gate.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      OWNER_ALLOWLIST: ${{ vars.OWNER_ALLOWLIST }}
+      OWNER_PATTERNS: ${{ vars.OWNER_PATTERNS }}
+      GITHUB_API_VERSION: '2026-03-10'
+      GATE_APP_ID: ${{ secrets.GATE_APP_ID }}
+      MERGE_REAPER_APP_ID: ${{ secrets.MERGE_REAPER_APP_ID }}
+      MERGE_REAPER_APP_PRIVATE_KEY: ${{ secrets.MERGE_REAPER_APP_PRIVATE_KEY }}
+      MERGE_REAPER_POLICY: config/merge-reaper.example.json
+      MERGE_REAPER_MIN_AGE_HOURS: ${{ inputs.minimum_age_hours || '55' }}
+      MERGE_REAPER_MAX_MERGES: ${{ inputs.max_merges || '3' }}
+      MERGE_REAPER_MAX_REPOSITORIES: '2000'
+      MERGE_REAPER_MAX_PRS_PER_REPOSITORY: '100'
+      MERGE_REAPER_OUTPUT: merge-reaper-report.json
+    steps:
+      - name: Check out the exact workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22.16.0'
+          cache: npm
+
+      - name: Install the exact lockfile
+        run: npm ci
+
+      - name: Render a no-write merge plan
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'plan'
+        run: node apps/reaper/src/main.mjs reaper plan
+
+      - name: Apply the reviewed exact-head merge policy
+        if: github.event_name == 'schedule' || inputs.mode == 'apply'
+        env:
+          MERGE_REAPER_CONFIRM: ${{ github.event_name == 'schedule' && 'MERGE-DEN-3570-NIGHTLY' || inputs.confirm }}
+        run: node apps/reaper/src/main.mjs reaper apply
+
+      - name: Summarize the report
+        if: always() && hashFiles('merge-reaper-report.json') != ''
+        run: |
+          node - <<'NODE'
+          const report = JSON.parse(require('node:fs').readFileSync('merge-reaper-report.json', 'utf8'));
+          const summary = report.summary;
+          require('node:fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            `## Merge reaper ${report.mode}\n\n` +
+            `- Repositories: **${summary.repositoriesDiscovered}**\n` +
+            `- Open PRs observed: **${summary.pullRequestsObserved}**\n` +
+            `- Eligible: **${summary.eligible}**\n` +
+            `- Selected: **${summary.selected}**\n` +
+            `- Merged: **${summary.merged}**\n` +
+            `- Failed: **${summary.failed}**\n`);
+          NODE
+
+      - name: Upload the exact-head decision report
+        if: always() && hashFiles('merge-reaper-report.json') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: merge-reaper-report-${{ github.run_id }}
+          path: merge-reaper-report.json
+          if-no-files-found: error
+          retention-days: 30
