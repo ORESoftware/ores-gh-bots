@@ -35,8 +35,10 @@ jobs:
           cat .changes/den-3793-reaper.bundle.part00 \
               .changes/den-3793-reaper.bundle.part01 \
               .changes/den-3793-reaper.bundle.part02 \
-              .changes/den-3793-reaper.bundle.part03 \
-              .changes/den-3793-reaper.bundle.part04 \
+              .changes/den-3793-reaper.bundle.part03.0 \
+              .changes/den-3793-reaper.bundle.part03.1 \
+              .changes/den-3793-reaper.bundle.part04.0 \
+              .changes/den-3793-reaper.bundle.part04.1 \
             | base64 --decode > "$RUNNER_TEMP/reaper-bundle/den-3793-reaper-files.tar.gz"
           echo '5305d8cb5afac5254fcb6185b2a191ba48d25f356bd44f528730c434c61d4083  '"$RUNNER_TEMP/reaper-bundle/den-3793-reaper-files.tar.gz" \
             | sha256sum --check --strict
@@ -46,7 +48,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -f .changes/den-3793-reaper.bundle.part0{0,1,2,3,4}
+          rm -f .changes/den-3793-reaper.bundle.part*
           rmdir .changes 2>/dev/null || true
           rm -f .github/workflows/export-source-once.yml
           rm -f .github/workflows/apply-reaper-bundle-once.yml
