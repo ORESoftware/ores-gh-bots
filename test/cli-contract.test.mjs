@@ -36,6 +36,22 @@ test('flags-2-env resolves typed server and exact-review inputs', () => {
   assert.equal(review.values.REVIEW_PR_NUMBER, 9);
   assert.equal(review.values.REVIEW_REASON, 'one-shot-runner');
   assert.equal(review.values.REVIEW_TYPE, 'review');
+
+  const reaper = resolveCli([
+    'node',
+    'reaper',
+    'apply',
+    '--minimum-age-hours',
+    '72',
+    '--max-merges',
+    '3',
+    '--confirm',
+    'MERGE-DEN-3570',
+  ], { env: {} });
+  assert.equal(reaper.command, 'reaper apply');
+  assert.equal(reaper.values.MERGE_REAPER_MIN_AGE_HOURS, 72);
+  assert.equal(reaper.values.MERGE_REAPER_MAX_MERGES, 3);
+  assert.equal(reaper.values.MERGE_REAPER_CONFIRM, 'MERGE-DEN-3570');
 });
 
 test('flags-2-env rejects unknown, duplicate, and invalid typed options without values in errors', () => {
@@ -59,6 +75,7 @@ test('credentials are environment-only and executable boundaries use the canonic
     '../apps/orchestrator/src/main.mjs',
     '../apps/runner/src/main.mjs',
     '../apps/cli/src/main.mjs',
+    '../apps/reaper/src/main.mjs',
     '../scripts/app-manifest.mjs',
   ]) {
     assert.match(await readFile(new URL(path, import.meta.url), 'utf8'), /resolveCli/u);

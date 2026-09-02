@@ -237,6 +237,17 @@ test('runtime and control-plane config require independent pinned identities', (
     CLAUDE_REVIEW_APP_ID: '2',
   })), /identities must be distinct/);
 
+  assert.doesNotThrow(() => validateRuntimeConfig(loadConfig({
+    ...distinct,
+    MERGE_REAPER_APP_ID: '6',
+    MERGE_REAPER_APP_PRIVATE_KEY: 'merge-reaper-key',
+  })));
+  assert.throws(() => validateControlPlaneConfig(loadConfig({
+    ...distinct,
+    MERGE_REAPER_APP_ID: '4',
+    MERGE_REAPER_APP_PRIVATE_KEY: 'merge-reaper-key',
+  })), /identities must be distinct/);
+
   assert.throws(() => validateControlPlaneConfig(loadConfig({
     ...distinct,
     REQUIRED_CI_APP_IDS: '',

@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const dispatchPath = new URL('../.github/workflows/review-dispatch.yml', import.meta.url);
 const ciPath = new URL('../.github/workflows/ci.yml', import.meta.url);
+const nightlyReaperPath = new URL('../.github/workflows/nightly-merge-reaper.yml', import.meta.url);
 const canaryKustomizationPath = new URL('../deploy/kubernetes/overlays/canary/kustomization.yaml', import.meta.url);
 const productionKustomizationPath = new URL('../deploy/kubernetes/overlays/production/kustomization.yaml', import.meta.url);
 const dockerfilePath = new URL('../Dockerfile', import.meta.url);
@@ -43,4 +44,19 @@ test('container bases are digest-pinned and canary selectors cannot overlap prod
   assert.match(production, /app\.kubernetes\.io\/instance: production/u);
   assert.match(canary, /includeSelectors: true/u);
   assert.match(production, /includeSelectors: true/u);
+});
+
+
+test('nightly merge reaper is local-time gated, App-authenticated, exact-head, and capped at three effects', async () => {
+  const workflow = await readFile(nightlyReaperPath, 'utf8');
+  assert.match(workflow, /America\/Chicago/u);
+  assert.match(workflow, /MERGE_REAPER_APP_ID: \$\{\{ secrets\.MERGE_REAPER_APP_ID \}\}/u);
+  assert.match(workflow, /MERGE_REAPER_APP_PRIVATE_KEY: \$\{\{ secrets\.MERGE_REAPER_APP_PRIVATE_KEY \}\}/u);
+  assert.match(workflow, /GATE_APP_ID: \$\{\{ secrets\.GATE_APP_ID \}\}/u);
+  assert.match(workflow, /MERGE_REAPER_MAX_MERGES: \$\{\{ inputs\.max_merges \|\| '3' \}\}/u);
+  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/u);
+  assert.match(workflow, /persist-credentials: false/u);
+  assert.match(workflow, /run: node apps\/reaper\/src\/main\.mjs reaper apply/u);
+  assert.doesNotMatch(workflow.match(/run: node apps\/reaper\/src\/main\.mjs reaper apply.*$/mu)?.[0] ?? '', /\$\{\{\s*inputs\./u);
+  assert.doesNotMatch(workflow, /GITHUB_TOKEN|github\.token/u);
 });

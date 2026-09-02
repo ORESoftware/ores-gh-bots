@@ -149,6 +149,7 @@ export function loadConfig(env = process.env) {
       claude: appCredentials(env, 'CLAUDE_REVIEW', reviewerFallback),
       gate: appCredentials(env, 'GATE', reviewerFallback),
       actions: appCredentials(env, 'ACTIONS'),
+      reaper: appCredentials(env, 'MERGE_REAPER'),
     },
     security: {
       allowSharedAppIdentity,
@@ -225,6 +226,11 @@ export function validateRuntimeConfig(config, { webhook = true, providers = true
     if (!config.apps.actions.id) missing.push('ACTIONS_APP_ID');
     if (!config.apps.actions.privateKey) missing.push('ACTIONS_APP_PRIVATE_KEY');
   }
+  const reaperConfigured = Boolean(config.apps.reaper.id || config.apps.reaper.privateKey);
+  if (reaperConfigured) {
+    if (!config.apps.reaper.id) missing.push('MERGE_REAPER_APP_ID');
+    if (!config.apps.reaper.privateKey) missing.push('MERGE_REAPER_APP_PRIVATE_KEY');
+  }
   if (missing.length) throw new Error(`Missing required configuration: ${missing.join(', ')}`);
 
   if (providers) {
@@ -239,6 +245,8 @@ export function validateRuntimeConfig(config, { webhook = true, providers = true
       ['openai', config.apps.openai.id],
       ['claude', config.apps.claude.id],
       ['gate', config.apps.gate.id],
+      ...(config.apps.actions.id ? [['actions', config.apps.actions.id]] : []),
+      ...(config.apps.reaper.id ? [['reaper', config.apps.reaper.id]] : []),
     ];
     const seen = new Map();
     for (const [role, id] of identities) {

@@ -21,8 +21,9 @@ Therefore the bot is not reviewing or gating fleet pull requests yet.
 - Review jobs re-fetch the pull request and bind both provider checks to the current head SHA.
 - OpenAI and Claude publish through independent GitHub App identities; the aggregate gate uses a third check-writer identity.
 - Missing, stale, truncated, malformed, refused, timed-out, or non-approving provider results fail closed.
-- A durable reconciler repairs missed deliveries and missing current-SHA checks; the nightly reaper remains a recovery lane rather than the primary trigger.
+- A durable reconciler repairs missed deliveries and missing current-SHA checks. The dependency-aware nightly reaper remains a recovery lane and will merge at most three explicitly opted-in, exact-head eligible pull requests in reviewed dependency order.
 - GitHub Actions can run as a supplemental audit/recovery lane or an offloaded executor through a separately restricted dispatcher App.
+- A dedicated no-webhook merge App and 01:00 America/Chicago workflow implement the 55-hour recovery policy with exact-SHA revalidation, explicit opt-in labels, dependency sorting, and a hard three-merge effect budget.
 - Rulesets can be planned in `evaluate` mode and activated for every target branch with `--branch-mode all`.
 - Canary and production resources use disjoint Kubernetes instance selectors, and CI builds the digest-pinned base image recipe.
 
@@ -32,9 +33,9 @@ Complete these in order; do not describe the fleet as protected until the final 
 
 1. Choose and deploy an immutable container image to the ORES Kubernetes cluster with persistent queue storage.
 2. Publish a stable HTTPS hostname and route `POST /webhooks/github` to the service. The checked-in Kubernetes base intentionally has no public Ingress.
-3. Register the five Apps from the reviewed manifests: orchestrator, OpenAI reviewer, Claude reviewer, aggregate gate, and central Actions dispatcher.
+3. Register the six Apps from the reviewed manifests: orchestrator, OpenAI reviewer, Claude reviewer, aggregate gate, merge reaper, and central Actions dispatcher.
 4. Store App private keys, the webhook secret, and provider keys through the encrypted SOPS/age lifecycle; never place them in GitHub manifests, CLI arguments, repository variables, or plaintext Git files.
-5. Install the four public fleet Apps in selected `*-test` organizations. Install the private dispatcher only on `ORESoftware/ores-gh-bots`.
+5. Install the five public fleet Apps in selected `*-test` organizations. Install the private dispatcher only on `ORESoftware/ores-gh-bots`.
 6. Populate and verify the installation inventory, owner allowlist/patterns, check App IDs, required CI contexts, and their App-ID pins.
 7. Deploy the canary, confirm `/readyz`, and verify webhook delivery plus all three check runs on a test pull request.
 8. Push a second commit to that pull request and prove the first SHA's successful checks cannot satisfy the new SHA.

@@ -72,7 +72,7 @@ const logger = createLogger({ service: 'ores-gh-bots-cli' });
 
 if (group === 'manifest' && action === 'print') {
   const role = subject ?? 'orchestrator';
-  const allowed = new Set(['orchestrator', 'openai-reviewer', 'claude-reviewer', 'gate-reviewer', 'actions-dispatcher']);
+  const allowed = new Set(['orchestrator', 'openai-reviewer', 'claude-reviewer', 'gate-reviewer', 'actions-dispatcher', 'merge-reaper']);
   if (!allowed.has(role)) throw new Error(`Unknown manifest role: ${role}`);
   console.log(await readFile(resolve(root, `github-apps/${role}.manifest.json`), 'utf8'));
 } else if (group === 'fleet' && action === 'discover') {

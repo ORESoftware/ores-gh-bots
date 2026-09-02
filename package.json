@@ -22,7 +22,8 @@
     "check": "npm run lint && npm run test:coverage",
     "verify:repository": "node scripts/verify-repository.mjs",
     "verify:github-apps": "node scripts/verify-github-apps.mjs",
-    "verify": "npm run verify:repository && npm run verify:github-apps"
+    "verify": "npm run verify:repository && npm run verify:github-apps",
+    "reaper": "node apps/reaper/src/main.mjs"
   },
   "license": "MIT",
   "dependencies": {

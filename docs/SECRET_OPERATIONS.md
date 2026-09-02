@@ -27,7 +27,7 @@ GitHub App identity is the App ID, not an individual private key. Rotate without
 5. Revoke the old key in GitHub.
 6. Record the App role, unchanged App ID, deployment revision, operator, reason, verification evidence, and old-key revocation time in the deployment audit log. Never record key material.
 
-This overlap is mandatory for orchestrator, OpenAI reviewer, Claude reviewer, review gate, and Actions dispatcher rotations.
+This overlap is mandatory for orchestrator, OpenAI reviewer, Claude reviewer, review gate, merge reaper, and Actions dispatcher rotations.
 
 ## Webhook-secret rotation
 
