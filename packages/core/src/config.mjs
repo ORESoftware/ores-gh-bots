@@ -122,15 +122,15 @@ export function loadConfig(env = process.env) {
     port: integer(env.PORT, DEFAULTS.port, { min: 1, max: 65_535 }),
     webhookPath: optionalString(env.GITHUB_WEBHOOK_PATH) ?? '/webhooks/github',
     bodyLimitBytes: integer(env.BODY_LIMIT_BYTES, DEFAULTS.bodyLimitBytes, { min: 1_024, max: 16_777_216 }),
-    headersTimeoutMs: integer(env.HEADERS_TIMEOUT_MS, DEFAULTS.headersTimeoutMs, { min: 1_000, max: 120_000 }),
-    requestTimeoutMs: integer(env.REQUEST_TIMEOUT_MS, DEFAULTS.requestTimeoutMs, { min: 1_000, max: 300_000 }),
-    keepAliveTimeoutMs: integer(env.KEEP_ALIVE_TIMEOUT_MS, DEFAULTS.keepAliveTimeoutMs, { min: 1_000, max: 60_000 }),
-    maxHeaderBytes: integer(env.MAX_HEADER_BYTES, DEFAULTS.maxHeaderBytes, { min: 8_192, max: 65_536 }),
-    maxHeadersCount: integer(env.MAX_HEADERS_COUNT, DEFAULTS.maxHeadersCount, { min: 16, max: 256 }),
-    maxRequestsPerSocket: integer(env.MAX_REQUESTS_PER_SOCKET, DEFAULTS.maxRequestsPerSocket, { min: 1, max: 10_000 }),
+    headersTimeoutMs: integer(env.HTTP_HEADERS_TIMEOUT_MS, DEFAULTS.headersTimeoutMs, { min: 1_000, max: 120_000 }),
+    requestTimeoutMs: integer(env.HTTP_REQUEST_TIMEOUT_MS, DEFAULTS.requestTimeoutMs, { min: 1_000, max: 300_000 }),
+    keepAliveTimeoutMs: integer(env.HTTP_KEEP_ALIVE_TIMEOUT_MS, DEFAULTS.keepAliveTimeoutMs, { min: 1_000, max: 60_000 }),
+    maxHeaderBytes: integer(env.HTTP_MAX_HEADER_BYTES, DEFAULTS.maxHeaderBytes, { min: 8_192, max: 65_536 }),
+    maxHeadersCount: integer(env.HTTP_MAX_HEADERS_COUNT, DEFAULTS.maxHeadersCount, { min: 16, max: 256 }),
+    maxRequestsPerSocket: integer(env.HTTP_MAX_REQUESTS_PER_SOCKET, DEFAULTS.maxRequestsPerSocket, { min: 1, max: 10_000 }),
   };
   if (server.headersTimeoutMs > server.requestTimeoutMs) {
-    throw new Error('HEADERS_TIMEOUT_MS must not exceed REQUEST_TIMEOUT_MS');
+    throw new Error('HTTP_HEADERS_TIMEOUT_MS must not exceed HTTP_REQUEST_TIMEOUT_MS');
   }
 
   return {
