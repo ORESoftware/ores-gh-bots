@@ -1,4 +1,4 @@
-name: Apply DEN-3570 merge reaper bundle once
+name: Publish validated DEN-3570 source once
 
 on:
   push:
@@ -11,11 +11,11 @@ permissions:
   contents: write
 
 concurrency:
-  group: apply-den-3570-merge-reaper-bundle
+  group: publish-den-3570-source
   cancel-in-progress: false
 
 jobs:
-  apply-validate-and-clean-up:
+  validate-and-publish-source:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -27,7 +27,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Reassemble and verify the reviewed source bundle
+      - name: Reassemble reviewed source and apply guarded corrections
         shell: bash
         run: |
           set -euo pipefail
@@ -43,105 +43,15 @@ jobs:
           echo '5305d8cb5afac5254fcb6185b2a191ba48d25f356bd44f528730c434c61d4083  '"$RUNNER_TEMP/reaper-bundle/den-3793-reaper-files.tar.gz" \
             | sha256sum --check --strict
           tar -xzf "$RUNNER_TEMP/reaper-bundle/den-3793-reaper-files.tar.gz" -C .
+          python3 .changes/den-3793-post.py
 
-      - name: Apply guarded parser-contract corrections found by hosted CI
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          test_path = Path('test/cli-contract.test.mjs')
-          test_source = test_path.read_text(encoding='utf-8')
-          test_before = """  const reaper = resolveCli([\n    'node',\n    'reaper',\n    'reaper',\n    'apply',\n"""
-          test_after = """  const reaper = resolveCli([\n    'node',\n    'reaper',\n    'apply',\n"""
-          test_count = test_source.count(test_before)
-          if test_count != 1:
-              raise SystemExit(f'expected exactly one reaper CLI fixture, found {test_count}')
-          test_path.write_text(test_source.replace(test_before, test_after, 1), encoding='utf-8')
-
-          flags_path = Path('.cli-flags.toml')
-          flags_source = flags_path.read_text(encoding='utf-8')
-          marker = '[commands.reaper]\n'
-          if flags_source.count(marker) != 1:
-              raise SystemExit('expected exactly one reaper command block')
-          prefix = flags_source.split(marker, 1)[0]
-          reaper_block = '''[commands.reaper]
-          help = "Plan or apply the fail-closed dependency-aware pull-request merge reaper."
-
-          [commands.reaper.flags.policy]
-          env = "MERGE_REAPER_POLICY"
-          aliases = ["policy"]
-          type = "string"
-          default = "config/merge-reaper.example.json"
-          help = "Reviewed dependency and merge policy JSON path."
-
-          [commands.reaper.flags.minimum_age_hours]
-          env = "MERGE_REAPER_MIN_AGE_HOURS"
-          aliases = ["minimum-age-hours"]
-          type = "integer"
-          default = 55
-          help = "Minimum pull-request age before consideration."
-
-          [commands.reaper.flags.max_merges]
-          env = "MERGE_REAPER_MAX_MERGES"
-          aliases = ["max-merges"]
-          type = "integer"
-          default = 3
-          help = "Maximum merge effects in one run; hard-capped at three."
-
-          [commands.reaper.flags.max_repositories]
-          env = "MERGE_REAPER_MAX_REPOSITORIES"
-          aliases = ["max-repositories"]
-          type = "integer"
-          default = 2000
-          help = "Maximum installed repositories to inspect."
-
-          [commands.reaper.flags.max_prs_per_repository]
-          env = "MERGE_REAPER_MAX_PRS_PER_REPOSITORY"
-          aliases = ["max-prs-per-repository"]
-          type = "integer"
-          default = 100
-          help = "Maximum open pull requests inspected per repository."
-
-          [commands.reaper.flags.output]
-          env = "MERGE_REAPER_OUTPUT"
-          aliases = ["output"]
-          type = "string"
-          default = "merge-reaper-report.json"
-          help = "Machine-readable report path."
-
-          [commands.reaper.flags.confirm]
-          env = "MERGE_REAPER_CONFIRM"
-          aliases = ["confirm"]
-          type = "string"
-          help = "Required MERGE-ticket acknowledgement for apply mode."
-
-          [commands.reaper.commands.plan]
-          help = "Inspect the installed fleet and render an exact-head merge plan without writes."
-
-          [commands.reaper.commands.apply]
-          help = "Merge at most three exact-head eligible pull requests in dependency order."
-          '''
-          flags_path.write_text(prefix + reaper_block, encoding='utf-8')
-          PY
-
-      - name: Remove transport-only files
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -f .changes/den-3793-reaper.bundle.part*
-          rmdir .changes 2>/dev/null || true
-          rm -f .github/workflows/export-source-once.yml
-          rm -f .github/workflows/apply-reaper-bundle-once.yml
-
-      - name: Install the exact workspace lockfile
+      - name: Install and validate the complete stacked source
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '22.16.0'
           cache: npm
 
-      - name: Validate the complete stacked source
+      - name: Run every source and policy gate
         shell: bash
         run: |
           set -euo pipefail
@@ -150,16 +60,19 @@ jobs:
           npm run verify
           git diff --check
 
-      - name: Commit the validated implementation to the existing branch
+      - name: Commit only non-workflow source
         shell: bash
         run: |
           set -euo pipefail
-          git add -A
+          rm -rf .changes
+          rm -f .github/workflows/nightly-merge-reaper.yml
+          git add -A -- ':!/.github/workflows/apply-reaper-bundle-once.yml' ':!/.github/workflows/export-source-once.yml'
+          git diff --cached --check
           if git diff --cached --quiet; then
             echo 'No source delta remained after validation.' >&2
             exit 1
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'feat(DEN-3570): add dependency-aware nightly merge reaper'
+          git commit -m 'feat(DEN-3570): add dependency-aware merge reaper source'
           git push origin HEAD:agent/den-3793-nightly-merge-reaper
