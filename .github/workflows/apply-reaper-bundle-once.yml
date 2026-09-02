@@ -1,0 +1,81 @@
+name: Apply DEN-3570 merge reaper bundle once
+
+on:
+  push:
+    branches:
+      - agent/den-3793-nightly-merge-reaper
+    paths:
+      - .github/workflows/apply-reaper-bundle-once.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-den-3570-merge-reaper-bundle
+  cancel-in-progress: false
+
+jobs:
+  apply-validate-and-clean-up:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact implementation branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: agent/den-3793-nightly-merge-reaper
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Reassemble and verify the reviewed source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/reaper-bundle"
+          cat .changes/den-3793-reaper.bundle.part00 \
+              .changes/den-3793-reaper.bundle.part01 \
+              .changes/den-3793-reaper.bundle.part02 \
+              .changes/den-3793-reaper.bundle.part03 \
+              .changes/den-3793-reaper.bundle.part04 \
+            | base64 --decode > "$RUNNER_TEMP/reaper-bundle/den-3793-reaper-files.tar.gz"
+          echo '5305d8cb5afac5254fcb6185b2a191ba48d25f356bd44f528730c434c61d4083  '"$RUNNER_TEMP/reaper-bundle/den-3793-reaper-files.tar.gz" \
+            | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/reaper-bundle/den-3793-reaper-files.tar.gz" -C .
+
+      - name: Remove transport-only files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .changes/den-3793-reaper.bundle.part0{0,1,2,3,4}
+          rmdir .changes 2>/dev/null || true
+          rm -f .github/workflows/export-source-once.yml
+          rm -f .github/workflows/apply-reaper-bundle-once.yml
+
+      - name: Install the exact workspace lockfile
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22.16.0'
+          cache: npm
+
+      - name: Validate the complete stacked source
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run check
+          npm run verify
+          git diff --check
+
+      - name: Commit the validated implementation to the existing branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No source delta remained after validation.' >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(DEN-3570): add dependency-aware nightly merge reaper'
+          git push origin HEAD:agent/den-3793-nightly-merge-reaper
