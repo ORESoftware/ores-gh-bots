@@ -56,7 +56,12 @@ export function createWebhookServer({ config, queue, logger, metrics, readiness 
     requiredCiContexts: config.review.requiredCiContexts,
   };
 
-  return createServer(async (request, response) => {
+  const server = createServer({
+    headersTimeout: config.server.headersTimeoutMs,
+    requestTimeout: config.server.requestTimeoutMs,
+    keepAliveTimeout: config.server.keepAliveTimeoutMs,
+    maxHeaderSize: config.server.maxHeaderBytes,
+  }, async (request, response) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
     try {
       if (request.method === 'GET' && url.pathname === '/healthz') return json(response, 200, { ok: true });
@@ -141,4 +146,8 @@ export function createWebhookServer({ config, queue, logger, metrics, readiness 
       return json(response, status, { error: status === 500 ? 'internal_error' : error.message });
     }
   });
+
+  server.maxHeadersCount = config.server.maxHeadersCount;
+  server.maxRequestsPerSocket = config.server.maxRequestsPerSocket;
+  return server;
 }
