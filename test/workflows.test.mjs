@@ -47,7 +47,7 @@ test('container bases are digest-pinned and canary selectors cannot overlap prod
 });
 
 
-test('nightly merge reaper is local-time gated, App-authenticated, exact-head, and capped at three effects', async () => {
+test('nightly merge reaper is local-time gated, App-authenticated, exact-head, capped, and privacy safe', async () => {
   const workflow = await readFile(nightlyReaperPath, 'utf8');
   assert.match(workflow, /America\/Chicago/u);
   assert.equal((workflow.match(/- cron: '7 [67] \* \* \*'/gu) ?? []).length, 2);
@@ -60,7 +60,11 @@ test('nightly merge reaper is local-time gated, App-authenticated, exact-head, a
   assert.match(workflow, /MERGE_REAPER_MAX_MERGES: \$\{\{ inputs\.max_merges \|\| '3' \}\}/u);
   assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/u);
   assert.match(workflow, /persist-credentials: false/u);
-  assert.match(workflow, /run: node apps\/reaper\/src\/main\.mjs reaper apply/u);
+  assert.match(workflow, /run: node apps\/reaper\/src\/main\.mjs reaper apply >\/dev\/null/u);
   assert.doesNotMatch(workflow.match(/run: node apps\/reaper\/src\/main\.mjs reaper apply.*$/mu)?.[0] ?? '', /\$\{\{\s*inputs\./u);
   assert.doesNotMatch(workflow, /GITHUB_TOKEN|github\.token/u);
+  assert.match(workflow, /privateMetadataRedacted: true/u);
+  assert.match(workflow, /fs\.rmSync\('merge-reaper-report\.json'\)/u);
+  assert.match(workflow, /path: merge-reaper-public-report\.json/u);
+  assert.doesNotMatch(workflow, /path: merge-reaper-report\.json/u);
 });
