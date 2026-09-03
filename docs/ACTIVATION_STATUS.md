@@ -4,16 +4,24 @@ This document deliberately separates implemented source from live fleet enforcem
 
 ## Current evidence
 
-As of 2026-08-31:
+As of 2026-09-03:
 
 - `ORESoftware/ores-gh-bots` exists with `main` as its default branch.
-- The authenticated primary GitHub account reports 155 active organization memberships, all with the `admin` role. This is a point-in-time inventory, not a permanent fleet manifest.
-- No ORES review GitHub App installation is visible to the authenticated account.
-- The repository's `canary` environment has no configured secrets or variables for the review control plane.
-- The scheduled fleet-plan workflow reaches its configuration preflight and fails closed because the required App identities and private keys are absent.
+- The authenticated primary GitHub account reported 155 active organization memberships, all with the `admin` role, during the 2026-08-31 inventory. This is a point-in-time observation, not a permanent fleet manifest.
+- No ORES review GitHub App installation was visible to the authenticated account during that inventory.
+- The repository's `canary` environment had no configured secrets or variables for the review control plane.
+- The scheduled fleet-plan workflow reached its configuration preflight and failed closed because the required App identities and private keys were absent.
 - No dual-review ruleset has been applied by this project.
 
-Therefore the bot is not reviewing or gating fleet pull requests yet.
+The live two-head canary in pull request #18 on 2026-09-02 confirmed the activation gap rather than assuming source completeness meant deployment:
+
+- Ordinary GitHub Actions `validate` checks passed independently on both the opened head and the later `pull_request.synchronize` head.
+- No `ores-review/openai`, `ores-review/claude`, or `ores-review/gate` check was created for either exact SHA.
+- No GitHub pull-request review was submitted by an ORES identity.
+- An authorized `/ores-review` comment produced no bot response and no new check, proving no deployed webhook consumer handled the command.
+- Ruleset read-back showed only the bootstrap rule on `refs/heads/main`, requiring one human approval and an unpinned `validate` status. It did not require either provider identity or the aggregate gate, and it did not protect the canary's feature target branch.
+
+Therefore the implementation is not yet reviewing or gating fleet pull requests. This is a failed-closed deployment result: do not merge around it, substitute ordinary CI for either provider, or claim fleet protection before the activation sequence below is complete.
 
 ## Implemented control plane
 
