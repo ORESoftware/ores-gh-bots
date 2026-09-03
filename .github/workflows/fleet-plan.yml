@@ -23,7 +23,7 @@ jobs:
           cache: npm
       - name: Install exact lockfile and build the pinned flags-2-env binding
         run: npm ci
-      - name: Generate a no-write ruleset plan
+      - name: Generate a no-write all-branch ruleset plan
         env:
           OWNER_ALLOWLIST: ${{ vars.OWNER_ALLOWLIST }}
           OWNER_PATTERNS: ${{ vars.OWNER_PATTERNS }}
@@ -33,11 +33,11 @@ jobs:
           CLAUDE_REVIEW_APP_ID: ${{ secrets.CLAUDE_REVIEW_APP_ID }}
           GATE_APP_ID: ${{ secrets.GATE_APP_ID }}
           GITHUB_ADMIN_TOKEN: ${{ secrets.GITHUB_ADMIN_TOKEN }}
-        run: node apps/cli/src/main.mjs rulesets plan --branch-mode protected > ruleset-plan.json
+        run: node apps/cli/src/main.mjs rulesets plan --branch-mode all > ruleset-plan.json
       - name: Add plan summary
         run: |
           {
-            echo '## ORES ruleset plan'
+            echo '## ORES all-branch ruleset plan'
             echo '```json'
             cat ruleset-plan.json
             echo '```'
