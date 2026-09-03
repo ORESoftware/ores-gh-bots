@@ -6,10 +6,9 @@ if [ "$#" -eq 0 ]; then
   exit 64
 fi
 
-printf '%s' 'entrypoint: executing' >&2
-for argument do
-  printf ' <%s>' "$argument" >&2
-done
-printf ' ....\n' >&2
+# Do not emit argv values: overridden commands may carry credentials or other
+# sensitive material. The argument count is sufficient for a bounded startup
+# diagnostic while preserving exact process and signal semantics.
+printf 'entrypoint: executing command with %s argument(s)\n' "$#" >&2
 
 exec "$@"
