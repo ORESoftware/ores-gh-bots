@@ -2,8 +2,9 @@ name: Nightly dependency-aware PR merge reaper
 
 on:
   schedule:
-    # GitHub schedules are UTC. The local-time gate below admits only 01:00
-    # America/Chicago, so these two entries cover both daylight and standard time.
+    # GitHub schedules are UTC. The local-time gate below admits only the first
+    # 01:07 America/Chicago occurrence, so these entries cover daylight and
+    # standard time without running twice during the repeated fall-back hour.
     - cron: '7 6 * * *'
     - cron: '7 7 * * *'
   workflow_dispatch:
@@ -50,7 +51,7 @@ jobs:
       run: ${{ steps.gate.outputs.run }}
     steps:
       - id: gate
-        name: Admit manual runs or 01:00 America/Chicago
+        name: Admit manual runs or the first 01:07 America/Chicago occurrence
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |
@@ -61,11 +62,17 @@ jobs:
 
           manual = os.environ["EVENT_NAME"] == "workflow_dispatch"
           local = datetime.now(ZoneInfo("America/Chicago"))
-          admitted = manual or local.hour == 1
+          # During the fall DST transition, 01:00-01:59 occurs twice. PEP 495
+          # marks the second occurrence with fold=1; admit only fold=0 so the
+          # two UTC schedules can never produce two automatic apply runs.
+          admitted = manual or (local.hour == 1 and local.fold == 0)
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"run={'true' if admitted else 'false'}\n")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write(f"Local time: `{local.isoformat()}`; admitted: `{admitted}`.\n")
+              summary.write(
+                  f"Local time: `{local.isoformat()}`; fold: `{local.fold}`; "
+                  f"admitted: `{admitted}`.\n"
+              )
           PY
 
   reap:
