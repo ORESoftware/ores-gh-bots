@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const dispatchPath = new URL('../.github/workflows/review-dispatch.yml', import.meta.url);
 const ciPath = new URL('../.github/workflows/ci.yml', import.meta.url);
+const fleetPlanPath = new URL('../.github/workflows/fleet-plan.yml', import.meta.url);
 const canaryKustomizationPath = new URL('../deploy/kubernetes/overlays/canary/kustomization.yaml', import.meta.url);
 const productionKustomizationPath = new URL('../deploy/kubernetes/overlays/production/kustomization.yaml', import.meta.url);
 const dockerfilePath = new URL('../Dockerfile', import.meta.url);
@@ -27,6 +28,14 @@ test('validation workflow does not persist the GitHub token into the checkout', 
   assert.match(workflow, /run: npm ci\s*$/mu);
   assert.doesNotMatch(workflow, /npm ci --ignore-scripts/u);
   assert.match(workflow, /docker build --pull=false --tag ores-gh-bots:\$\{\{ github\.sha \}\}/u);
+});
+
+test('scheduled fleet planning covers all branches without writing rulesets', async () => {
+  const workflow = await readFile(fleetPlanPath, 'utf8');
+  assert.match(workflow, /rulesets plan --branch-mode all/u);
+  assert.doesNotMatch(workflow, /rulesets apply/u);
+  assert.doesNotMatch(workflow, /--branch-mode protected/u);
+  assert.match(workflow, /environment: canary/u);
 });
 
 test('container bases are digest-pinned and canary selectors cannot overlap production', async () => {
