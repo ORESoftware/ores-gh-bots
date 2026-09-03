@@ -112,35 +112,51 @@ jobs:
 
       - name: Render a no-write merge plan
         if: github.event_name == 'workflow_dispatch' && inputs.mode == 'plan'
-        run: node apps/reaper/src/main.mjs reaper plan
+        run: node apps/reaper/src/main.mjs reaper plan >/dev/null
 
       - name: Apply the reviewed exact-head merge policy
         if: github.event_name == 'schedule' || inputs.mode == 'apply'
         env:
           MERGE_REAPER_CONFIRM: ${{ github.event_name == 'schedule' && 'MERGE-DEN-3570-NIGHTLY' || inputs.confirm }}
-        run: node apps/reaper/src/main.mjs reaper apply
+        run: node apps/reaper/src/main.mjs reaper apply >/dev/null
 
-      - name: Summarize the report
+      - name: Render a redacted public decision report
         if: always() && hashFiles('merge-reaper-report.json') != ''
         run: |
           node - <<'NODE'
-          const report = JSON.parse(require('node:fs').readFileSync('merge-reaper-report.json', 'utf8'));
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('merge-reaper-report.json', 'utf8'));
           const summary = report.summary;
-          require('node:fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+          const publicReport = {
+            version: report.version,
+            generatedAt: report.generatedAt,
+            mode: report.mode,
+            policy: report.policy,
+            summary,
+            privateMetadataRedacted: true,
+          };
+          fs.writeFileSync(
+            'merge-reaper-public-report.json',
+            `${JSON.stringify(publicReport, null, 2)}\n`,
+            { mode: 0o600 },
+          );
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
             `## Merge reaper ${report.mode}\n\n` +
             `- Repositories: **${summary.repositoriesDiscovered}**\n` +
             `- Open PRs observed: **${summary.pullRequestsObserved}**\n` +
             `- Eligible: **${summary.eligible}**\n` +
             `- Selected: **${summary.selected}**\n` +
             `- Merged: **${summary.merged}**\n` +
-            `- Failed: **${summary.failed}**\n`);
+            `- Failed: **${summary.failed}**\n` +
+            `- Private repository and pull-request metadata: **redacted**\n`);
+          fs.rmSync('merge-reaper-report.json');
           NODE
 
-      - name: Upload the exact-head decision report
-        if: always() && hashFiles('merge-reaper-report.json') != ''
+      - name: Upload the redacted exact-head decision report
+        if: always() && hashFiles('merge-reaper-public-report.json') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: merge-reaper-report-${{ github.run_id }}
-          path: merge-reaper-report.json
+          name: merge-reaper-public-report-${{ github.run_id }}
+          path: merge-reaper-public-report.json
           if-no-files-found: error
           retention-days: 30
