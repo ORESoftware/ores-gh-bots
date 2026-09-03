@@ -112,8 +112,8 @@ help = "Ruleset enforcement: disabled, evaluate, or active."
 env = "ORES_CLI_BRANCH_MODE"
 aliases = ["branch-mode"]
 type = "string"
-default = "protected"
-help = "Branch scope: all or protected."
+default = "all"
+help = "Branch scope: all or protected. All branches are the fleet default; protected is an explicit opt-down."
 
 [commands.rulesets.commands.plan.flags.limit]
 env = "ORES_CLI_LIMIT"
@@ -141,8 +141,8 @@ help = "Ruleset enforcement: disabled, evaluate, or active."
 env = "ORES_CLI_BRANCH_MODE"
 aliases = ["branch-mode"]
 type = "string"
-default = "protected"
-help = "Branch scope: all or protected."
+default = "all"
+help = "Branch scope: all or protected. All branches are the fleet default; protected is an explicit opt-down."
 
 [commands.rulesets.commands.apply.flags.limit]
 env = "ORES_CLI_LIMIT"
