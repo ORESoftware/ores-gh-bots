@@ -24,6 +24,55 @@ type = "integer"
 default = 8080
 help = "Webhook HTTP listener port."
 
+[flags.body_limit_bytes]
+env = "BODY_LIMIT_BYTES"
+aliases = ["body-limit-bytes"]
+type = "integer"
+default = 2000000
+help = "Maximum GitHub webhook request body size in bytes."
+
+[flags.headers_timeout_ms]
+env = "HTTP_HEADERS_TIMEOUT_MS"
+aliases = ["headers-timeout-ms"]
+type = "integer"
+default = 10000
+help = "Maximum time to receive complete HTTP headers."
+
+[flags.request_timeout_ms]
+env = "HTTP_REQUEST_TIMEOUT_MS"
+aliases = ["request-timeout-ms"]
+type = "integer"
+default = 30000
+help = "Maximum time to receive a complete HTTP request."
+
+[flags.keep_alive_timeout_ms]
+env = "HTTP_KEEP_ALIVE_TIMEOUT_MS"
+aliases = ["keep-alive-timeout-ms"]
+type = "integer"
+default = 5000
+help = "Idle keep-alive timeout for webhook connections."
+
+[flags.max_header_bytes]
+env = "HTTP_MAX_HEADER_BYTES"
+aliases = ["max-header-bytes"]
+type = "integer"
+default = 16384
+help = "Maximum aggregate HTTP request-header bytes."
+
+[flags.max_headers_count]
+env = "HTTP_MAX_HEADERS_COUNT"
+aliases = ["max-headers-count"]
+type = "integer"
+default = 64
+help = "Maximum number of parsed HTTP request headers."
+
+[flags.max_requests_per_socket]
+env = "HTTP_MAX_REQUESTS_PER_SOCKET"
+aliases = ["max-requests-per-socket"]
+type = "integer"
+default = 100
+help = "Maximum requests accepted on one keep-alive socket."
+
 [commands.review]
 help = "Run one exact-SHA pull-request review or gate repair."
 
