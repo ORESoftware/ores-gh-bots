@@ -11,3 +11,4 @@ export * from './log.mjs';
 export * from './metrics.mjs';
 export * from './security-policy.mjs';
 export * from './cli.mjs';
+export * from './canary-evidence.mjs';
