@@ -38,6 +38,30 @@ test('flags-2-env resolves typed server and exact-review inputs', () => {
   assert.equal(review.values.REVIEW_TYPE, 'review');
 });
 
+test('ruleset commands default to evaluate-mode all branches', () => {
+  const plan = resolveCli(['node', 'cli', 'rulesets', 'plan'], { env: {} });
+  assert.equal(plan.command, 'rulesets plan');
+  assert.equal(plan.values.ORES_CLI_ENFORCEMENT, 'evaluate');
+  assert.equal(plan.values.ORES_CLI_BRANCH_MODE, 'all');
+
+  const apply = resolveCli(['node', 'cli', 'rulesets', 'apply'], { env: {} });
+  assert.equal(apply.command, 'rulesets apply');
+  assert.equal(apply.values.ORES_CLI_ENFORCEMENT, 'evaluate');
+  assert.equal(apply.values.ORES_CLI_BRANCH_MODE, 'all');
+});
+
+test('protected-only rulesets require an explicit opt-down', () => {
+  const plan = resolveCli([
+    'node',
+    'cli',
+    'rulesets',
+    'plan',
+    '--branch-mode',
+    'protected',
+  ], { env: {} });
+  assert.equal(plan.values.ORES_CLI_BRANCH_MODE, 'protected');
+});
+
 test('flags-2-env rejects unknown, duplicate, and invalid typed options without values in errors', () => {
   for (const argv of [
     ['node', 'runner', 'review', '--unknown', 'sensitive-value'],
