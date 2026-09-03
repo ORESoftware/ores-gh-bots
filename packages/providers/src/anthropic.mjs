@@ -7,21 +7,26 @@ export function buildAnthropicRequest({ model, maxTokens, context }) {
     model,
     max_tokens: maxTokens,
     system: REVIEW_SYSTEM_PROMPT,
-    tools: [{
-      name: 'submit_code_review',
-      description: 'Submit the final merge-gating code review. Always call this tool exactly once after analyzing the untrusted pull-request data.',
-      input_schema: reviewJsonSchema,
-    }],
-    tool_choice: { type: 'tool', name: 'submit_code_review' },
-    disable_parallel_tool_use: true,
+    output_config: {
+      format: {
+        type: 'json_schema',
+        schema: reviewJsonSchema,
+      },
+    },
     messages: [{ role: 'user', content: buildReviewEnvelope(context) }],
   };
 }
 
 export function extractAnthropicReview(response) {
-  const block = response?.content?.find((item) => item.type === 'tool_use' && item.name === 'submit_code_review');
-  if (!block) throw new Error(`Anthropic response did not call submit_code_review (stop_reason=${response?.stop_reason ?? 'unknown'})`);
-  return block.input;
+  const blocks = (response?.content ?? []).filter((item) => item.type === 'text' && typeof item.text === 'string');
+  if (blocks.length !== 1 || !blocks[0].text) {
+    throw new Error(`Anthropic response must contain exactly one structured text result (received=${blocks.length}, stop_reason=${response?.stop_reason ?? 'unknown'})`);
+  }
+  try {
+    return JSON.parse(blocks[0].text);
+  } catch {
+    throw new Error('Anthropic structured review JSON was invalid');
+  }
 }
 
 export async function reviewWithAnthropic({ config, context, fetchImpl = fetch }) {
@@ -38,5 +43,12 @@ export async function reviewWithAnthropic({ config, context, fetchImpl = fetch }
     fetchImpl,
   });
   if (response?.stop_reason === 'max_tokens') throw new Error('Anthropic review was truncated at max_tokens');
-  return validateReviewResult(extractAnthropicReview(response), { maxFindings: context.maxFindings });
+  if (response?.stop_reason === 'refusal') throw new Error('Anthropic refused the review');
+  if (response?.stop_reason !== 'end_turn') {
+    throw new Error(`Anthropic response did not complete normally (stop_reason=${response?.stop_reason ?? 'unknown'})`);
+  }
+  return validateReviewResult(extractAnthropicReview(response), {
+    maxFindings: context.maxFindings,
+    allowApproval: context.collection?.complete !== false,
+  });
 }

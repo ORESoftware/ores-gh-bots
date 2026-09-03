@@ -1,5 +1,10 @@
 import { DEFAULTS } from './constants.mjs';
 
+const DEFAULT_PROVIDER_ALLOWED_ORIGINS = [
+  'https://api.openai.com',
+  'https://api.anthropic.com',
+];
+
 function optionalString(value) {
   const text = String(value ?? '').trim();
   return text || null;
@@ -9,7 +14,7 @@ function integer(value, fallback, { min = Number.MIN_SAFE_INTEGER, max = Number.
   if (value === undefined || value === null || value === '') return fallback;
   const parsed = Number.parseInt(String(value), 10);
   if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
-    throw new Error(`Invalid integer value: ${value}`);
+    throw new Error('Invalid integer configuration value');
   }
   return parsed;
 }
@@ -19,7 +24,7 @@ function boolean(value, fallback = false) {
   const normalized = String(value).trim().toLowerCase();
   if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
-  throw new Error(`Invalid boolean value: ${value}`);
+  throw new Error('Invalid boolean configuration value');
 }
 
 function csv(value) {
@@ -30,17 +35,36 @@ function csv(value) {
     .filter(Boolean);
 }
 
+function providerAllowedOrigins(value) {
+  const configured = csv(value);
+  const values = configured.length ? configured : DEFAULT_PROVIDER_ALLOWED_ORIGINS;
+  const origins = [];
+  for (const [index, item] of values.entries()) {
+    let parsed;
+    try {
+      parsed = new URL(item);
+    } catch {
+      throw new Error(`PROVIDER_ALLOWED_ORIGINS entry ${index + 1} is invalid`);
+    }
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
+      throw new Error(`PROVIDER_ALLOWED_ORIGINS entry ${index + 1} must be a credential-free HTTPS origin`);
+    }
+    if (!origins.includes(parsed.origin)) origins.push(parsed.origin);
+  }
+  return origins;
+}
+
 function requiredCiAppIds(value) {
   const result = {};
-  for (const item of csv(value)) {
+  for (const [index, item] of csv(value).entries()) {
     const separator = item.lastIndexOf('=');
     if (separator <= 0 || separator === item.length - 1) {
-      throw new Error(`Invalid REQUIRED_CI_APP_IDS entry: ${item}`);
+      throw new Error(`REQUIRED_CI_APP_IDS entry ${index + 1} is invalid`);
     }
     const context = item.slice(0, separator).trim();
     const appId = integer(item.slice(separator + 1), null, { min: 1 });
-    if (!context || appId === null) throw new Error(`Invalid REQUIRED_CI_APP_IDS entry: ${item}`);
-    if (Object.hasOwn(result, context)) throw new Error(`Duplicate REQUIRED_CI_APP_IDS context: ${context}`);
+    if (!context || appId === null) throw new Error(`REQUIRED_CI_APP_IDS entry ${index + 1} is invalid`);
+    if (Object.hasOwn(result, context)) throw new Error(`REQUIRED_CI_APP_IDS entry ${index + 1} duplicates a context`);
     result[context] = appId;
   }
   return result;
@@ -61,6 +85,21 @@ function appCredentials(env, prefix, fallback = null) {
   return { id, privateKey };
 }
 
+function validateProviderBaseUrl(name, value, allowedOrigins) {
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${name} base URL is invalid`);
+  }
+  if (parsed.protocol !== 'https:') throw new Error(`${name} base URL must use HTTPS`);
+  if (parsed.username || parsed.password) throw new Error(`${name} base URL must not contain credentials`);
+  if (parsed.search || parsed.hash) throw new Error(`${name} base URL must not contain a query string or fragment`);
+  if (!allowedOrigins.includes(parsed.origin)) {
+    throw new Error(`${name} base URL origin is not allowed: ${parsed.origin}`);
+  }
+}
+
 export function loadConfig(env = process.env) {
   const orchestrator = {
     id: optionalString(env.GITHUB_APP_ID),
@@ -70,7 +109,10 @@ export function loadConfig(env = process.env) {
   const reviewerFallback = allowSharedAppIdentity ? orchestrator : null;
 
   const ownerAllowlist = csv(env.OWNER_ALLOWLIST);
-  const ownerPatterns = csv(env.OWNER_PATTERNS).map((pattern) => new RegExp(pattern, 'i'));
+  const ownerPatterns = csv(env.OWNER_PATTERNS).map((pattern, index) => {
+    try { return new RegExp(pattern, 'i'); }
+    catch { throw new Error(`OWNER_PATTERNS entry ${index + 1} is invalid`); }
+  });
 
   return {
     server: {
@@ -95,19 +137,20 @@ export function loadConfig(env = process.env) {
     },
     security: {
       allowSharedAppIdentity,
+      providerAllowedOrigins: providerAllowedOrigins(env.PROVIDER_ALLOWED_ORIGINS),
     },
     providers: {
       openai: {
         apiKey: optionalString(env.OPENAI_API_KEY),
         baseUrl: optionalString(env.OPENAI_BASE_URL) ?? 'https://api.openai.com',
-        model: optionalString(env.OPENAI_MODEL) ?? 'gpt-5-mini',
-        maxOutputTokens: integer(env.OPENAI_MAX_OUTPUT_TOKENS, 8_000, { min: 256 }),
+        model: optionalString(env.OPENAI_MODEL) ?? 'gpt-5.6-sol',
+        maxOutputTokens: integer(env.OPENAI_MAX_OUTPUT_TOKENS, 16_000, { min: 256 }),
       },
       anthropic: {
         apiKey: optionalString(env.ANTHROPIC_API_KEY),
         baseUrl: optionalString(env.ANTHROPIC_BASE_URL) ?? 'https://api.anthropic.com',
-        model: optionalString(env.ANTHROPIC_MODEL) ?? 'claude-sonnet-4-5',
-        maxTokens: integer(env.ANTHROPIC_MAX_TOKENS, 8_000, { min: 256 }),
+        model: optionalString(env.ANTHROPIC_MODEL) ?? 'claude-sonnet-5',
+        maxTokens: integer(env.ANTHROPIC_MAX_TOKENS, 16_000, { min: 256 }),
         version: optionalString(env.ANTHROPIC_VERSION) ?? '2023-06-01',
       },
     },
@@ -168,6 +211,12 @@ export function validateRuntimeConfig(config, { webhook = true, providers = true
     if (!config.apps.actions.privateKey) missing.push('ACTIONS_APP_PRIVATE_KEY');
   }
   if (missing.length) throw new Error(`Missing required configuration: ${missing.join(', ')}`);
+
+  if (providers) {
+    const allowedOrigins = config.security?.providerAllowedOrigins ?? DEFAULT_PROVIDER_ALLOWED_ORIGINS;
+    validateProviderBaseUrl('OpenAI', config.providers.openai.baseUrl, allowedOrigins);
+    validateProviderBaseUrl('Anthropic', config.providers.anthropic.baseUrl, allowedOrigins);
+  }
 
   if (!config.security?.allowSharedAppIdentity) {
     const identities = [

@@ -1,6 +1,5 @@
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
 function nowMs() {
@@ -40,16 +39,75 @@ function rowToJob(row) {
   };
 }
 
+function positiveInteger(value, field) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error(`${field} must be a positive integer`);
+  return parsed;
+}
+
+function boundedIdentifier(value, field, maxLength) {
+  const text = String(value ?? '').trim();
+  if (!text || text.length > maxLength || !/^[A-Za-z0-9_.-]+$/u.test(text)) {
+    throw new Error(`${field} is invalid`);
+  }
+  return text;
+}
+
+function boundedText(value, field, maxLength, { nullable = false } = {}) {
+  if (nullable && (value === null || value === undefined || value === '')) return null;
+  const text = String(value ?? '');
+  if (!text || text.length > maxLength || /[\0\r\n]/u.test(text)) throw new Error(`${field} is invalid`);
+  return text;
+}
+
+function normalizeJob(job, defaultMaxAttempts) {
+  if (!job || !['review', 'gate'].includes(job.type)) throw new Error('Invalid queue job type');
+  const installationId = positiveInteger(job.installationId, 'installationId');
+  const prNumber = positiveInteger(job.prNumber, 'prNumber');
+  const owner = boundedIdentifier(job.owner, 'owner', 100);
+  const repo = boundedIdentifier(job.repo, 'repo', 100);
+  const headSha = job.headSha === null || job.headSha === undefined
+    ? null
+    : boundedText(job.headSha, 'headSha', 128);
+  const reason = boundedText(job.reason ?? 'unspecified', 'reason', 512);
+  const sender = boundedText(job.sender, 'sender', 100, { nullable: true });
+  const payloadJson = JSON.stringify(job.payload ?? {});
+  if (Buffer.byteLength(payloadJson, 'utf8') > 65_536) throw new Error('payload is too large');
+  const maxAttempts = positiveInteger(job.maxAttempts ?? defaultMaxAttempts, 'maxAttempts');
+  const availableAt = Number(job.availableAt ?? nowMs());
+  if (!Number.isSafeInteger(availableAt) || availableAt < 0) throw new Error('availableAt is invalid');
+  return {
+    type: job.type,
+    installationId,
+    owner,
+    repo,
+    prNumber,
+    headSha,
+    reason,
+    force: Boolean(job.force),
+    needsAuthorization: Boolean(job.needsAuthorization),
+    sender,
+    payloadJson,
+    maxAttempts,
+    availableAt,
+  };
+}
+
 function dedupeKey(job) {
-  const stable = [job.type, `${job.owner}/${job.repo}`.toLowerCase(), job.prNumber, job.headSha ?? 'current'].join(':');
-  return job.force ? `${stable}:force:${randomUUID()}` : stable;
+  return [
+    job.type,
+    job.installationId,
+    `${job.owner}/${job.repo}`.toLowerCase(),
+    job.prNumber,
+    job.headSha ?? 'current',
+  ].join(':');
 }
 
 export class SqliteQueue {
   constructor({ path = './data/ores-gh-bots.sqlite', maxAttempts = 8 } = {}) {
     this.path = path === ':memory:' ? ':memory:' : resolve(path);
-    this.maxAttempts = maxAttempts;
-    if (this.path !== ':memory:') mkdirSync(dirname(this.path), { recursive: true });
+    this.maxAttempts = positiveInteger(maxAttempts, 'maxAttempts');
+    if (this.path !== ':memory:') mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(this.path);
     this.db.exec(`
       PRAGMA journal_mode = WAL;
@@ -105,59 +163,108 @@ export class SqliteQueue {
   }
 
   markDelivery(deliveryId, event, action = null) {
+    const normalizedDeliveryId = boundedText(deliveryId, 'deliveryId', 128);
+    const normalizedEvent = boundedText(event, 'event', 64);
+    const normalizedAction = boundedText(action, 'action', 100, { nullable: true });
     const result = this.db.prepare(`
       INSERT OR IGNORE INTO deliveries(delivery_id, event, action, received_at)
       VALUES (?, ?, ?, ?)
-    `).run(deliveryId, event, action, nowMs());
+    `).run(normalizedDeliveryId, normalizedEvent, normalizedAction, nowMs());
     return result.changes === 1;
   }
 
-  enqueue(job) {
-    if (!job?.installationId || !job.owner || !job.repo || !job.prNumber || !['review', 'gate'].includes(job.type)) {
-      throw new Error('Invalid queue job');
+  /**
+   * Persist delivery de-duplication and every derived job in one transaction.
+   * A transient queue failure must leave the delivery retryable by GitHub.
+   */
+  acceptDelivery(deliveryId, event, action, jobs) {
+    if (!Array.isArray(jobs)) throw new Error('jobs must be an array');
+    // Validate all jobs before marking the delivery so deterministic payload
+    // errors cannot strand a delivery with only a de-duplication record.
+    for (const job of jobs) normalizeJob(job, this.maxAttempts);
+
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const firstDelivery = this.markDelivery(deliveryId, event, action);
+      if (!firstDelivery) {
+        this.db.exec('COMMIT');
+        return { firstDelivery: false, inserted: 0 };
+      }
+      let inserted = 0;
+      for (const job of jobs) {
+        if (this.enqueue(job).inserted) inserted += 1;
+      }
+      this.db.exec('COMMIT');
+      return { firstDelivery: true, inserted };
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch {}
+      throw error;
     }
+  }
+
+  enqueue(job) {
+    const normalized = normalizeJob(job, this.maxAttempts);
     const timestamp = nowMs();
-    const key = dedupeKey(job);
+    const key = dedupeKey(normalized);
     const result = this.db.prepare(`
-      INSERT OR IGNORE INTO jobs(
+      INSERT INTO jobs(
         dedupe_key, type, installation_id, owner, repo, pr_number, head_sha, reason,
         force, needs_authorization, sender, payload_json, status, attempts, max_attempts,
         available_at, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)
+      ON CONFLICT(dedupe_key) DO UPDATE SET
+        installation_id = excluded.installation_id,
+        reason = excluded.reason,
+        force = CASE WHEN jobs.status = 'running' THEN 1 ELSE excluded.force END,
+        needs_authorization = excluded.needs_authorization,
+        sender = excluded.sender,
+        payload_json = excluded.payload_json,
+        status = CASE WHEN jobs.status = 'running' THEN 'running' ELSE 'pending' END,
+        attempts = CASE WHEN jobs.status = 'running' THEN jobs.attempts ELSE 0 END,
+        max_attempts = excluded.max_attempts,
+        available_at = excluded.available_at,
+        lease_owner = CASE WHEN jobs.status = 'running' THEN jobs.lease_owner ELSE NULL END,
+        lease_expires_at = CASE WHEN jobs.status = 'running' THEN jobs.lease_expires_at ELSE NULL END,
+        last_error = CASE WHEN jobs.status = 'running' THEN jobs.last_error ELSE NULL END,
+        updated_at = excluded.updated_at
+      WHERE excluded.force = 1 AND jobs.status IN ('running', 'completed', 'dead')
     `).run(
       key,
-      job.type,
-      Number(job.installationId),
-      String(job.owner),
-      String(job.repo),
-      Number(job.prNumber),
-      job.headSha ?? null,
-      String(job.reason ?? 'unspecified'),
-      job.force ? 1 : 0,
-      job.needsAuthorization ? 1 : 0,
-      job.sender ?? null,
-      JSON.stringify(job.payload ?? {}),
-      Number(job.maxAttempts ?? this.maxAttempts),
-      Number(job.availableAt ?? timestamp),
+      normalized.type,
+      normalized.installationId,
+      normalized.owner,
+      normalized.repo,
+      normalized.prNumber,
+      normalized.headSha,
+      normalized.reason,
+      normalized.force ? 1 : 0,
+      normalized.needsAuthorization ? 1 : 0,
+      normalized.sender,
+      normalized.payloadJson,
+      normalized.maxAttempts,
+      normalized.availableAt,
       timestamp,
       timestamp,
     );
-    const row = result.changes === 1
-      ? this.db.prepare('SELECT * FROM jobs WHERE id = ?').get(result.lastInsertRowid)
-      : this.db.prepare('SELECT * FROM jobs WHERE dedupe_key = ?').get(key);
+    const row = this.db.prepare('SELECT * FROM jobs WHERE dedupe_key = ?').get(key);
     return { inserted: result.changes === 1, job: rowToJob(row) };
   }
 
   claimNext(workerId, leaseMs) {
+    const normalizedWorkerId = boundedText(workerId, 'workerId', 200);
+    const normalizedLeaseMs = positiveInteger(leaseMs, 'leaseMs');
     const timestamp = nowMs();
     this.db.exec('BEGIN IMMEDIATE');
     try {
       this.db.prepare(`
         UPDATE jobs
-        SET status = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'pending' END,
+        SET status = CASE WHEN force = 1 THEN 'pending' WHEN attempts >= max_attempts THEN 'dead' ELSE 'pending' END,
+            attempts = CASE WHEN force = 1 THEN 0 ELSE attempts END,
+            force = 0,
             lease_owner = NULL,
             lease_expires_at = NULL,
             last_error = CASE
+              WHEN force = 1 THEN last_error
               WHEN attempts >= max_attempts THEN COALESCE(last_error, 'lease expired after final attempt')
               ELSE last_error
             END,
@@ -183,9 +290,10 @@ export class SqliteQueue {
       }
       const update = this.db.prepare(`
         UPDATE jobs
-        SET status = 'running', attempts = attempts + 1, lease_owner = ?, lease_expires_at = ?, updated_at = ?
+        SET status = 'running', attempts = attempts + 1, force = 0,
+            lease_owner = ?, lease_expires_at = ?, updated_at = ?
         WHERE id = ? AND status = 'pending'
-      `).run(workerId, timestamp + leaseMs, timestamp, row.id);
+      `).run(normalizedWorkerId, timestamp + normalizedLeaseMs, timestamp, row.id);
       if (update.changes !== 1) {
         this.db.exec('ROLLBACK');
         return null;
@@ -204,34 +312,67 @@ export class SqliteQueue {
     const result = this.db.prepare(`
       UPDATE jobs SET lease_expires_at = ?, updated_at = ?
       WHERE id = ? AND status = 'running' AND lease_owner = ?
-    `).run(timestamp + leaseMs, timestamp, jobId, workerId);
+    `).run(
+      timestamp + positiveInteger(leaseMs, 'leaseMs'),
+      timestamp,
+      positiveInteger(jobId, 'jobId'),
+      boundedText(workerId, 'workerId', 200),
+    );
     return result.changes === 1;
   }
 
   complete(jobId, workerId) {
     const result = this.db.prepare(`
       UPDATE jobs
-      SET status = 'completed', lease_owner = NULL, lease_expires_at = NULL, last_error = NULL, updated_at = ?
+      SET status = CASE WHEN force = 1 THEN 'pending' ELSE 'completed' END,
+          attempts = CASE WHEN force = 1 THEN 0 ELSE attempts END,
+          force = 0,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          last_error = NULL,
+          updated_at = ?
       WHERE id = ? AND status = 'running' AND lease_owner = ?
-    `).run(nowMs(), jobId, workerId);
+    `).run(nowMs(), positiveInteger(jobId, 'jobId'), boundedText(workerId, 'workerId', 200));
     return result.changes === 1;
   }
 
   fail(job, workerId, error, { baseDelayMs = 2_000, maxDelayMs = 15 * 60_000 } = {}) {
     const timestamp = nowMs();
-    const dead = job.attempts >= job.maxAttempts;
+    const attemptBudgetExhausted = job.attempts >= job.maxAttempts;
     const delay = Math.min(maxDelayMs, baseDelayMs * 2 ** Math.max(0, job.attempts - 1));
     const result = this.db.prepare(`
       UPDATE jobs
-      SET status = ?, available_at = ?, lease_owner = NULL, lease_expires_at = NULL,
-          last_error = ?, updated_at = ?
+      SET status = CASE WHEN force = 1 THEN 'pending' ELSE ? END,
+          attempts = CASE WHEN force = 1 THEN 0 ELSE attempts END,
+          available_at = CASE WHEN force = 1 THEN ? ELSE ? END,
+          force = 0,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          last_error = ?,
+          updated_at = ?
       WHERE id = ? AND status = 'running' AND lease_owner = ?
-    `).run(dead ? 'dead' : 'pending', dead ? timestamp : timestamp + delay, String(error).slice(0, 8_000), timestamp, job.id, workerId);
-    return { updated: result.changes === 1, dead, delayMs: dead ? 0 : delay };
+    `).run(
+      attemptBudgetExhausted ? 'dead' : 'pending',
+      timestamp,
+      attemptBudgetExhausted ? timestamp : timestamp + delay,
+      String(error).slice(0, 8_000),
+      timestamp,
+      positiveInteger(job.id, 'jobId'),
+      boundedText(workerId, 'workerId', 200),
+    );
+    const updated = result.changes === 1;
+    const current = updated ? this.db.prepare('SELECT status, available_at FROM jobs WHERE id = ?').get(job.id) : null;
+    const dead = current?.status === 'dead';
+    const delayMs = updated && !dead ? Math.max(0, Number(current.available_at) - timestamp) : 0;
+    return { updated, dead, delayMs };
   }
 
   recordReview({ owner, repo, prNumber, headSha, provider, result = null, error = null, checkRunId = null }) {
-    if (!headSha) throw new Error('headSha is required to persist a review');
+    const normalizedOwner = boundedIdentifier(owner, 'owner', 100);
+    const normalizedRepo = boundedIdentifier(repo, 'repo', 100);
+    const normalizedPrNumber = positiveInteger(prNumber, 'prNumber');
+    const normalizedHeadSha = boundedText(headSha, 'headSha', 128);
+    if (!['openai', 'claude'].includes(provider)) throw new Error('provider is invalid');
     this.db.prepare(`
       INSERT INTO reviews(owner, repo, pr_number, head_sha, provider, result_json, error, check_run_id, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -240,7 +381,17 @@ export class SqliteQueue {
         error = excluded.error,
         check_run_id = excluded.check_run_id,
         updated_at = excluded.updated_at
-    `).run(owner, repo, prNumber, headSha, provider, result ? JSON.stringify(result) : null, error, checkRunId, nowMs());
+    `).run(
+      normalizedOwner,
+      normalizedRepo,
+      normalizedPrNumber,
+      normalizedHeadSha,
+      provider,
+      result ? JSON.stringify(result) : null,
+      error ? String(error).slice(0, 8_000) : null,
+      checkRunId,
+      nowMs(),
+    );
   }
 
   getReviews({ owner, repo, prNumber, headSha }) {
@@ -261,10 +412,19 @@ export class SqliteQueue {
     return Object.fromEntries(rows.map((row) => [row.status, Number(row.count)]));
   }
 
-  prune({ deliveriesBefore = nowMs() - 30 * 24 * 60 * 60_000, completedBefore = nowMs() - 14 * 24 * 60 * 60_000 } = {}) {
+  prune({
+    deliveriesBefore = nowMs() - 30 * 24 * 60 * 60_000,
+    completedBefore = nowMs() - 14 * 24 * 60 * 60_000,
+    deadBefore = nowMs() - 30 * 24 * 60 * 60_000,
+    reviewsBefore = null,
+  } = {}) {
     const deliveries = this.db.prepare('DELETE FROM deliveries WHERE received_at < ?').run(deliveriesBefore).changes;
-    const jobs = this.db.prepare("DELETE FROM jobs WHERE status = 'completed' AND updated_at < ?").run(completedBefore).changes;
-    return { deliveries, jobs };
+    const completed = this.db.prepare("DELETE FROM jobs WHERE status = 'completed' AND updated_at < ?").run(completedBefore).changes;
+    const dead = this.db.prepare("DELETE FROM jobs WHERE status = 'dead' AND updated_at < ?").run(deadBefore).changes;
+    const reviews = reviewsBefore === null
+      ? 0
+      : this.db.prepare('DELETE FROM reviews WHERE updated_at < ?').run(reviewsBefore).changes;
+    return { deliveries, jobs: completed + dead, reviews };
   }
 
   close() {

@@ -24,14 +24,14 @@ function pullRequest(sha = 'abc') {
   };
 }
 
-function fakeClient({ currentSha = 'abc' } = {}) {
+function fakeClient({ currentSha = 'abc', patch = '@@ -1 +1 @@\n-old\n+new' } = {}) {
   let checkId = 100;
   const calls = [];
   return {
     calls,
     async paginate(path) {
       calls.push({ method: 'PAGINATE', path });
-      if (path.includes('/files')) return [{ filename: 'a.js', status: 'modified', additions: 1, deletions: 0, changes: 1, patch: '@@ -1 +1 @@\n-old\n+new' }];
+      if (path.includes('/files')) return [{ filename: 'a.js', status: 'modified', additions: 1, deletions: 0, changes: 1, patch }];
       throw new Error(`Unexpected paginate: ${path}`);
     },
     async request(method, path, options = {}) {
@@ -43,6 +43,7 @@ function fakeClient({ currentSha = 'abc' } = {}) {
       if (method === 'GET' && path.includes('/check-runs?filter=latest')) return { data: { check_runs: [] } };
       if (method === 'GET' && path.endsWith('/status')) return { data: { statuses: [] } };
       if (method === 'POST' && path.endsWith('/reviews')) return { data: { id: 1 } };
+      if (method === 'POST' && path.endsWith('/dispatches')) return { data: null };
       throw new Error(`Unexpected request: ${method} ${path}`);
     },
   };
@@ -55,7 +56,10 @@ function providerFetch(url) {
     }));
   }
   if (String(url).includes('anthropic')) {
-    return Promise.resolve(new Response(JSON.stringify({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_code_review', input: approved }] }), {
+    return Promise.resolve(new Response(JSON.stringify({
+      stop_reason: 'end_turn',
+      content: [{ type: 'text', text: JSON.stringify(approved) }],
+    }), {
       status: 200, headers: { 'content-type': 'application/json' },
     }));
   }
@@ -103,6 +107,41 @@ test('engine publishes two approvals and a successful exact-SHA gate', async () 
   } finally { queue.close(); }
 });
 
+test('supplemental GHA dispatch uses the preferred Actions App without a PAT', async () => {
+  const queue = new SqliteQueue({ path: ':memory:' });
+  const client = fakeClient();
+  const runtimeConfig = config();
+  runtimeConfig.gha.mode = 'supplemental';
+  runtimeConfig.gha.dispatchToken = null;
+  runtimeConfig.apps.actions = { id: '5', privateKey: 'unused-in-mock' };
+  const roles = [];
+  const appAuth = {
+    async repoToken(role) {
+      roles.push(role);
+      return { installationId: role === 'actions' ? 5 : 1, token: `token-${role}` };
+    },
+  };
+  const engine = new ReviewEngine({
+    config: runtimeConfig,
+    client,
+    auth: appAuth,
+    queue,
+    logger: silentLogger,
+    metrics: new Metrics(),
+    fetchImpl: providerFetch,
+  });
+  try {
+    await engine.process({
+      id: 1, type: 'review', installationId: 1, owner: 'O', repo: 'R', prNumber: 1, headSha: 'abc', reason: 'test',
+      attempts: 1, maxAttempts: 1,
+    });
+    assert.equal(roles.includes('actions'), true);
+    const dispatch = client.calls.find((call) => call.method === 'POST' && call.path.endsWith('/dispatches'));
+    assert.equal(dispatch.options.body.inputs.head_sha, 'abc');
+    assert.equal(dispatch.options.body.inputs.owner, 'O');
+  } finally { queue.close(); }
+});
+
 test('engine refuses to review a stale queued SHA and enqueues the current SHA', async () => {
   const queue = new SqliteQueue({ path: ':memory:' });
   const client = fakeClient({ currentSha: 'new-sha' });
@@ -115,6 +154,19 @@ test('engine refuses to review a stale queued SHA and enqueues the current SHA',
     assert.equal(result.skipped, 'stale-head');
     const replacement = queue.claimNext('worker', 30_000);
     assert.equal(replacement.headSha, 'new-sha');
+    assert.equal(client.calls.some((call) => call.method === 'POST' && call.path.endsWith('/check-runs')), false);
+  } finally { queue.close(); }
+});
+
+test('engine rejects binary, unavailable, or truncated review context before provider execution', async () => {
+  const queue = new SqliteQueue({ path: ':memory:' });
+  const client = fakeClient({ patch: null });
+  const engine = new ReviewEngine({ config: config(), client, auth, queue, logger: silentLogger, metrics: new Metrics(), fetchImpl: providerFetch });
+  try {
+    await assert.rejects(() => engine.process({
+      id: 1, type: 'review', installationId: 1, owner: 'O', repo: 'R', prNumber: 1, headSha: 'abc', reason: 'test',
+      attempts: 1, maxAttempts: 1,
+    }), /diff coverage is incomplete/);
     assert.equal(client.calls.some((call) => call.method === 'POST' && call.path.endsWith('/check-runs')), false);
   } finally { queue.close(); }
 });

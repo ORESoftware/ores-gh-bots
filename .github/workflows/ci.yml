@@ -14,21 +14,29 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check out source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22.16.0'
           cache: npm
-      - name: Verify lockfile
-        run: npm ci --ignore-scripts
+      - name: Install exact lockfile and build the pinned flags-2-env binding
+        run: npm ci
       - name: Lint and test
         run: npm run check
       - name: Verify repository inventory
         run: npm run verify
+      - name: Build the pinned runtime image
+        run: docker build --pull=false --tag ores-gh-bots:${{ github.sha }} .

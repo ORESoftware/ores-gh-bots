@@ -9,3 +9,5 @@ export * from './gate.mjs';
 export * from './events.mjs';
 export * from './log.mjs';
 export * from './metrics.mjs';
+export * from './security-policy.mjs';
+export * from './cli.mjs';

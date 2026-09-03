@@ -10,23 +10,16 @@ import {
   listInstallationRepositories,
   upsertRepositoryRuleset,
 } from '../../../packages/github/src/index.mjs';
-import { createLogger, loadConfig, ownerIsAllowed, redactObject, validateRuntimeConfig } from '../../../packages/core/src/index.mjs';
+import {
+  createLogger,
+  loadConfig,
+  ownerIsAllowed,
+  redactObject,
+  resolveCli,
+  validateRuntimeConfig,
+} from '../../../packages/core/src/index.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-
-function parseArgs(argv) {
-  const positional = [];
-  const flags = {};
-  for (let index = 0; index < argv.length; index += 1) {
-    const item = argv[index];
-    if (!item.startsWith('--')) positional.push(item);
-    else {
-      const [key, inline] = item.slice(2).split('=', 2);
-      flags[key] = inline ?? (argv[index + 1]?.startsWith('--') ? true : argv[++index] ?? true);
-    }
-  }
-  return { positional, flags };
-}
 
 async function readJson(path) {
   return JSON.parse(await readFile(resolve(root, path), 'utf8'));
@@ -66,9 +59,15 @@ function usage() {
 `);
 }
 
-const { positional, flags } = parseArgs(process.argv.slice(2));
-const [group, action, subject] = positional;
-const config = loadConfig();
+const cli = resolveCli();
+if (cli.help) {
+  cli.printHelp();
+  process.exit(0);
+}
+const [group, action] = cli.command.split(' ');
+const [subject] = cli.positionals;
+const values = cli.values;
+const config = loadConfig(cli.env);
 const logger = createLogger({ service: 'ores-gh-bots-cli' });
 
 if (group === 'manifest' && action === 'print') {
@@ -80,24 +79,28 @@ if (group === 'manifest' && action === 'print') {
   validateRuntimeConfig(config, { webhook: false, providers: false });
   const client = new GitHubClient({ apiBaseUrl: config.github.apiBaseUrl, apiVersion: config.github.apiVersion });
   const auth = new AppAuth({ client, apps: config.apps, logger });
-  const repositories = await discover({ config, client, auth, limit: Number(flags.limit ?? config.reconciliation.maxRepos) });
+  const repositories = await discover({ config, client, auth, limit: Number(values.ORES_CLI_LIMIT ?? config.reconciliation.maxRepos) });
   console.log(JSON.stringify({ count: repositories.length, repositories }, null, 2));
 } else if (group === 'rulesets' && ['plan', 'apply'].includes(action)) {
-  if (!flags.repository) validateRuntimeConfig(config, { webhook: false, providers: false });
+  if (!values.ORES_CLI_REPOSITORY) validateRuntimeConfig(config, { webhook: false, providers: false });
   if (!config.admin.token) throw new Error('GITHUB_ADMIN_TOKEN is required for ruleset planning/application');
   const fleetConfig = await readJson(config.admin.fleetConfigPath);
   const client = new GitHubClient({ apiBaseUrl: config.github.apiBaseUrl, apiVersion: config.github.apiVersion });
   const auth = new AppAuth({ client, apps: config.apps, logger });
-  const repositories = flags.repository
-    ? [{ full_name: String(flags.repository), owner: String(flags.repository).split('/')[0], repo: String(flags.repository).split('/')[1] }]
-    : await discover({ config, client, auth, limit: Number(flags.limit ?? config.reconciliation.maxRepos) });
-  const enforcement = String(flags.enforcement ?? (action === 'apply' ? 'evaluate' : 'evaluate'));
-  if (action === 'apply' && enforcement === 'active' && !String(flags.confirm ?? '').startsWith('ACTIVATE-')) {
+  const repositories = values.ORES_CLI_REPOSITORY
+    ? [{
+      full_name: String(values.ORES_CLI_REPOSITORY),
+      owner: String(values.ORES_CLI_REPOSITORY).split('/')[0],
+      repo: String(values.ORES_CLI_REPOSITORY).split('/')[1],
+    }]
+    : await discover({ config, client, auth, limit: Number(values.ORES_CLI_LIMIT ?? config.reconciliation.maxRepos) });
+  const enforcement = String(values.ORES_CLI_ENFORCEMENT);
+  if (action === 'apply' && enforcement === 'active' && !String(values.ORES_CLI_CONFIRM ?? '').startsWith('ACTIVATE-')) {
     throw new Error('Active enforcement requires --confirm ACTIVATE-<change-ticket>');
   }
   const payload = buildRulesetPayload({
     enforcement,
-    branchMode: String(flags['branch-mode'] ?? 'protected'),
+    branchMode: String(values.ORES_CLI_BRANCH_MODE),
     protectedBranchPatterns: fleetConfig.protected_branch_patterns,
     rulesetName: fleetConfig.ruleset_name,
     appIds: {
@@ -117,10 +120,16 @@ if (group === 'manifest' && action === 'print') {
       });
     } catch (error) {
       results.push({ repository: repository.full_name, error: error.message, status: error.status ?? null });
-      if (action === 'apply' && !flags.continue) break;
+      if (action === 'apply' && !values.ORES_CLI_CONTINUE) break;
     }
   }
-  console.log(JSON.stringify(redactObject({ action, enforcement, branch_mode: flags['branch-mode'] ?? 'protected', results }), null, 2));
+  console.log(JSON.stringify(redactObject({
+    action,
+    enforcement,
+    branch_mode: values.ORES_CLI_BRANCH_MODE,
+    results,
+  }), null, 2));
+  if (results.some((result) => result.error)) process.exitCode = 1;
 } else {
   usage();
   process.exitCode = 2;

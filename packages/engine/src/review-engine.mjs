@@ -5,6 +5,7 @@ import {
   redactText,
 } from '../../core/src/index.mjs';
 import {
+  checkExternalId,
   completeFailedCheck,
   completeGateCheck,
   completeReviewCheck,
@@ -125,7 +126,7 @@ export class ReviewEngine {
   async #runProvider({ provider, job, pullRequest, context }) {
     const role = provider === 'openai' ? 'openai' : 'claude';
     const checkName = CHECK_NAMES[provider];
-    const access = await this.auth.repoToken(role, job.owner, job.repo, job.installationId);
+    const access = await this.auth.repoToken(role, job.owner, job.repo);
     const url = detailsUrl(this.config, job.owner, job.repo, job.prNumber, pullRequest.head.sha);
     const check = await ensureInProgressCheck({
       client: this.client,
@@ -135,7 +136,8 @@ export class ReviewEngine {
       headSha: pullRequest.head.sha,
       name: checkName,
       detailsUrl: url,
-      externalId: `${provider}:${job.owner}/${job.repo}#${job.prNumber}@${pullRequest.head.sha}`,
+      externalId: checkExternalId(provider, job.owner, job.repo, job.prNumber, pullRequest.head.sha),
+      expectedAppId: this.config.apps[role].id,
       summary: `${provider} is reviewing the exact pull-request head SHA ${pullRequest.head.sha}.`,
     });
 
@@ -223,7 +225,11 @@ export class ReviewEngine {
 
     const gate = await this.publishGate({ ...job, headSha: pullRequest.head.sha }, { pullRequest: latest, orchestratorToken: access.token });
 
-    if (this.config.gha.mode === 'supplemental' && this.config.gha.dispatchToken) {
+    const supplementalDispatchConfigured = Boolean(
+      this.config.gha.dispatchToken
+      || (this.config.apps.actions.id && this.config.apps.actions.privateKey),
+    );
+    if (this.config.gha.mode === 'supplemental' && supplementalDispatchConfigured) {
       await this.#dispatchOffload(job, pullRequest).catch((error) => {
         this.logger.warn('supplemental GHA dispatch failed', { error: errorSummary(error) });
       });
@@ -241,7 +247,7 @@ export class ReviewEngine {
       return { skipped: 'stale-head', currentHeadSha: pullRequest.head.sha };
     }
 
-    const gateAccess = await this.auth.repoToken('gate', job.owner, job.repo, job.installationId);
+    const gateAccess = await this.auth.repoToken('gate', job.owner, job.repo);
     const url = detailsUrl(this.config, job.owner, job.repo, job.prNumber, pullRequest.head.sha);
     const gateCheck = await ensureInProgressCheck({
       client: this.client,
@@ -251,7 +257,8 @@ export class ReviewEngine {
       headSha: pullRequest.head.sha,
       name: CHECK_NAMES.gate,
       detailsUrl: url,
-      externalId: `gate:${job.owner}/${job.repo}#${job.prNumber}@${pullRequest.head.sha}`,
+      externalId: checkExternalId('gate', job.owner, job.repo, job.prNumber, pullRequest.head.sha),
+      expectedAppId: this.config.apps.gate.id,
       summary: 'Waiting for both exact-SHA AI reviews and all configured CI contexts.',
     });
     const reviews = this.queue.getReviews({
