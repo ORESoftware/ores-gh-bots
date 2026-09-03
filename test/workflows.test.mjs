@@ -50,6 +50,10 @@ test('container bases are digest-pinned and canary selectors cannot overlap prod
 test('nightly merge reaper is local-time gated, App-authenticated, exact-head, and capped at three effects', async () => {
   const workflow = await readFile(nightlyReaperPath, 'utf8');
   assert.match(workflow, /America\/Chicago/u);
+  assert.equal((workflow.match(/- cron: '7 [67] \* \* \*'/gu) ?? []).length, 2);
+  assert.match(workflow, /admitted = manual or \(local\.hour == 1 and local\.fold == 0\)/u);
+  assert.doesNotMatch(workflow, /admitted = manual or local\.hour == 1\s*$/mu);
+  assert.match(workflow, /fold: `\{local\.fold\}`/u);
   assert.match(workflow, /MERGE_REAPER_APP_ID: \$\{\{ secrets\.MERGE_REAPER_APP_ID \}\}/u);
   assert.match(workflow, /MERGE_REAPER_APP_PRIVATE_KEY: \$\{\{ secrets\.MERGE_REAPER_APP_PRIVATE_KEY \}\}/u);
   assert.match(workflow, /GATE_APP_ID: \$\{\{ secrets\.GATE_APP_ID \}\}/u);
