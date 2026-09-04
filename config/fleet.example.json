@@ -1,0 +1,12 @@
+{
+  "owner_allowlist": ["ORESoftware"],
+  "owner_patterns": [".*-test$"],
+  "repository_exclude_patterns": ["^archive-", "-archive$"],
+  "protected_branch_patterns": [
+    "refs/heads/main",
+    "refs/heads/master",
+    "refs/heads/dev",
+    "refs/heads/release/**"
+  ],
+  "ruleset_name": "ORES dual-AI pull-request gate"
+}

@@ -1,0 +1,12 @@
+services:
+  orchestrator:
+    build: .
+    env_file: .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ores-gh-bots-data:/data
+    restart: unless-stopped
+
+volumes:
+  ores-gh-bots-data: {}

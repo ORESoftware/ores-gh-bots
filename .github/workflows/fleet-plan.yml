@@ -1,0 +1,41 @@
+name: Fleet ruleset plan
+
+on:
+  schedule:
+    - cron: '17 12 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: canary
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.16.0'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Generate a no-write ruleset plan
+        env:
+          OWNER_ALLOWLIST: ${{ vars.OWNER_ALLOWLIST }}
+          OWNER_PATTERNS: ${{ vars.OWNER_PATTERNS }}
+          GITHUB_APP_ID: ${{ secrets.ORCHESTRATOR_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}
+          OPENAI_REVIEW_APP_ID: ${{ secrets.OPENAI_REVIEW_APP_ID }}
+          CLAUDE_REVIEW_APP_ID: ${{ secrets.CLAUDE_REVIEW_APP_ID }}
+          GATE_APP_ID: ${{ secrets.GATE_APP_ID }}
+          GITHUB_ADMIN_TOKEN: ${{ secrets.GITHUB_ADMIN_TOKEN }}
+        run: node apps/cli/src/main.mjs rulesets plan --branch-mode protected > ruleset-plan.json
+      - name: Add plan summary
+        run: |
+          echo '## ORES ruleset plan' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat ruleset-plan.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

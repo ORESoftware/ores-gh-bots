@@ -1,0 +1,81 @@
+name: ORES review dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      owner:
+        description: Pull-request repository owner
+        required: true
+        type: string
+      repo:
+        description: Pull-request repository name
+        required: true
+        type: string
+      pr_number:
+        description: Pull-request number
+        required: true
+        type: string
+      head_sha:
+        description: Exact PR head SHA expected by the dispatcher
+        required: true
+        type: string
+      installation_id:
+        description: Orchestrator App installation ID
+        required: false
+        type: string
+      reason:
+        description: Dispatch reason
+        required: false
+        default: github-actions-dispatch
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ores-review-${{ inputs.owner }}-${{ inputs.repo }}-${{ inputs.pr_number }}-${{ inputs.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: canary
+    steps:
+      - name: Check out trusted reviewer source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.16.0'
+          cache: npm
+      - name: Install exact lockfile
+        run: npm ci --ignore-scripts
+      - name: Validate trusted reviewer source
+        run: npm run check
+      - name: Review exact pull-request head
+        env:
+          REVIEW_OWNER: ${{ inputs.owner }}
+          REVIEW_REPO: ${{ inputs.repo }}
+          REVIEW_PR_NUMBER: ${{ inputs.pr_number }}
+          REVIEW_HEAD_SHA: ${{ inputs.head_sha }}
+          REVIEW_INSTALLATION_ID: ${{ inputs.installation_id }}
+          REVIEW_REASON: ${{ inputs.reason }}
+          OWNER_ALLOWLIST: ${{ inputs.owner }}
+          GITHUB_APP_ID: ${{ secrets.ORCHESTRATOR_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}
+          OPENAI_REVIEW_APP_ID: ${{ secrets.OPENAI_REVIEW_APP_ID }}
+          OPENAI_REVIEW_APP_PRIVATE_KEY: ${{ secrets.OPENAI_REVIEW_APP_PRIVATE_KEY }}
+          CLAUDE_REVIEW_APP_ID: ${{ secrets.CLAUDE_REVIEW_APP_ID }}
+          CLAUDE_REVIEW_APP_PRIVATE_KEY: ${{ secrets.CLAUDE_REVIEW_APP_PRIVATE_KEY }}
+          GATE_APP_ID: ${{ secrets.GATE_APP_ID }}
+          GATE_APP_PRIVATE_KEY: ${{ secrets.GATE_APP_PRIVATE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-mini' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL || 'claude-sonnet-4-5' }}
+          REQUIRED_CI_CONTEXTS: ${{ vars.REQUIRED_CI_CONTEXTS }}
+        run: node apps/runner/src/main.mjs

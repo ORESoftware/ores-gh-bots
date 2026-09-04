@@ -1,0 +1,10 @@
+{
+  "name": "ORES Review Actions Dispatcher",
+  "url": "https://github.com/ORESoftware/ores-gh-bots",
+  "public": false,
+  "default_permissions": {
+    "actions": "write",
+    "metadata": "read"
+  },
+  "default_events": []
+}
