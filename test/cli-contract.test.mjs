@@ -14,7 +14,7 @@ test('repository-root flags-2-env contract audits cleanly', () => {
   });
 });
 
-test('flags-2-env resolves typed server and exact-review inputs', () => {
+test('flags-2-env resolves typed server, exact-review, and reaper inputs', () => {
   const server = resolveCli(['node', 'orchestrator', '--port', '9090', '--worker-only'], { env: {} });
   assert.equal(server.values.PORT, 9090);
   assert.equal(server.values.ORES_WORKER_ONLY, true);
@@ -52,6 +52,30 @@ test('flags-2-env resolves typed server and exact-review inputs', () => {
   assert.equal(reaper.values.MERGE_REAPER_MIN_AGE_HOURS, 72);
   assert.equal(reaper.values.MERGE_REAPER_MAX_MERGES, 3);
   assert.equal(reaper.values.MERGE_REAPER_CONFIRM, 'MERGE-DEN-3570');
+});
+
+test('ruleset commands default to evaluate-mode all branches', () => {
+  const plan = resolveCli(['node', 'cli', 'rulesets', 'plan'], { env: {} });
+  assert.equal(plan.command, 'rulesets plan');
+  assert.equal(plan.values.ORES_CLI_ENFORCEMENT, 'evaluate');
+  assert.equal(plan.values.ORES_CLI_BRANCH_MODE, 'all');
+
+  const apply = resolveCli(['node', 'cli', 'rulesets', 'apply'], { env: {} });
+  assert.equal(apply.command, 'rulesets apply');
+  assert.equal(apply.values.ORES_CLI_ENFORCEMENT, 'evaluate');
+  assert.equal(apply.values.ORES_CLI_BRANCH_MODE, 'all');
+});
+
+test('protected-only rulesets require an explicit opt-down', () => {
+  const plan = resolveCli([
+    'node',
+    'cli',
+    'rulesets',
+    'plan',
+    '--branch-mode',
+    'protected',
+  ], { env: {} });
+  assert.equal(plan.values.ORES_CLI_BRANCH_MODE, 'protected');
 });
 
 test('flags-2-env rejects unknown, duplicate, and invalid typed options without values in errors', () => {
