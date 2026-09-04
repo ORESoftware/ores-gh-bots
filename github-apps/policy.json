@@ -81,6 +81,23 @@
         "ACTIONS_APP_ID",
         "ACTIONS_APP_PRIVATE_KEY"
       ]
+    },
+    "reaper": {
+      "manifest": "merge-reaper.manifest.json",
+      "visibility": "public-unlisted",
+      "installationScope": "fleet",
+      "permissions": {
+        "checks": "read",
+        "contents": "write",
+        "metadata": "read",
+        "pull_requests": "write",
+        "statuses": "read"
+      },
+      "events": [],
+      "secretEnv": [
+        "MERGE_REAPER_APP_ID",
+        "MERGE_REAPER_APP_PRIVATE_KEY"
+      ]
     }
   }
 }

@@ -48,6 +48,7 @@ The default reviewer models are `gpt-5.6-sol` and `claude-sonnet-5`; both are co
 - `apps/orchestrator`: webhook server, worker loop, and reconciler.
 - `apps/runner`: one-shot review execution for GitHub Actions or incident repair.
 - `apps/cli`: App manifest, fleet discovery, and ruleset commands.
+- `apps/reaper`: fail-closed, dependency-aware exact-SHA nightly merge planning and apply.
 - `packages/core`: policy, schemas, redaction, event routing, diff limits, and gate evaluation.
 - `packages/github`: App authentication and GitHub REST operations.
 - `packages/providers`: OpenAI and Anthropic adapters.
@@ -63,10 +64,10 @@ The default reviewer models are `gpt-5.6-sol` and `claude-sonnet-5`; both are co
 5. Push another commit and verify the old approvals no longer satisfy the PR.
 6. Change test rulesets to `active`, observe, then expand to production organizations.
 
-The older nightly reaper remains useful as a recovery path, but it should call this service or enqueue current-SHA reviews rather than act as the primary review trigger.
+The dependency-aware nightly reaper is implemented as a recovery path. It never replaces event-driven review: it requires the current-SHA ORES gate, independent green CI, explicit opt-in, resolved threads, clean mergeability, and reviewed dependency order before performing at most three sequential merges.
 
 ## Activation status
 
-The control plane is implemented but is **not fleet-active**. Source code, a GitHub repository, and green local tests do not establish any of the external gates: a deployed public HTTPS webhook, five registered App identities, provider/App credentials, App installations, `evaluate`-mode canary proof, or active repository rulesets. The service fails closed when those inputs are absent.
+The control plane is implemented but is **not fleet-active**. Source code, a GitHub repository, and green local tests do not establish any of the external gates: a deployed public HTTPS webhook, six registered App identities, provider/App credentials, App installations, `evaluate`-mode canary proof, or active repository rulesets. The service fails closed when those inputs are absent.
 
-See `docs/ACTIVATION_STATUS.md`, `docs/ROLLOUT.md`, `docs/APP_REGISTRATION.md`, and `docs/THREAT_MODEL.md` before activation.
+See `docs/ACTIVATION_STATUS.md`, `docs/ROLLOUT.md`, `docs/APP_REGISTRATION.md`, `docs/MERGE_REAPER.md`, and `docs/THREAT_MODEL.md` before activation.

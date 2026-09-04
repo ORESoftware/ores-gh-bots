@@ -72,6 +72,19 @@
           ]
         }
       ]
+    },
+    "reaper": {
+      "appId": null,
+      "slug": "replace-with-merge-reaper-app-slug",
+      "visibility": "public-unlisted",
+      "installations": [
+        {
+          "account": "replace-with-org-login",
+          "installationId": null,
+          "repositorySelection": "all",
+          "repositories": []
+        }
+      ]
     }
   }
 }
