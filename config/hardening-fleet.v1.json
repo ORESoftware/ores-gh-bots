@@ -1,0 +1,31 @@
+{
+  "$schema": "./hardening-fleet.v1.schema.json",
+  "api_version": "ores.dev/fleet-hardening/v1",
+  "kind": "FleetHardeningPolicy",
+  "metadata": {
+    "name": "ores-fleet-hardening",
+    "version": "1.0.0"
+  },
+  "spec": {
+    "sql": {
+      "authority": "organization-local-with-central-mirror",
+      "namespace_pattern": "^[a-z][a-z0-9_]{0,62}$",
+      "migration_registry": "declarative-migrations/declarative-postgres-migrate.rs",
+      "diesel_model": "code-first",
+      "seaorm_model": "database-first"
+    },
+    "kubernetes": {
+      "cluster_repository": "ORESoftware/k8s-cluster",
+      "shared_library_repository": "ORESoftware/k8s-libs-and-shared-defs",
+      "deployment_model": "gitops"
+    },
+    "repository": {
+      "binding_path": ".ores/repository-hardening.v1.json",
+      "fail_closed": true
+    },
+    "supply_chain": {
+      "source_revision_required": true,
+      "content_sha256_required": true
+    }
+  }
+}

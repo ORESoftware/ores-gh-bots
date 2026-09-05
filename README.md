@@ -50,6 +50,18 @@ Expose `POST /webhooks/github` over HTTPS and configure the orchestrator GitHub 
 - `packages/queue`: SQLite-backed durable work queue.
 - `packages/engine`: review/check/gate orchestration.
 
+## Fleet-hardening contract
+
+`config/hardening-fleet.v1.json` is the canonical public authority for organization hardening bindings. Its co-versioned JSON Schema is `config/hardening-fleet.v1.schema.json`; the policy and schema are validated as an exact, fail-closed pair by `npm run verify:fleet-hardening`.
+
+Consumers must reference the policy by a full 40-character commit SHA and the SHA-256 digest of the policy bytes. A branch, tag, mutable URL, or digest-free reference is not an acceptable binding. The source policy fixes these cross-organization invariants:
+
+- organization-local SQL namespaces with a central migration mirror;
+- Diesel code-first and SeaORM database-first migration direction;
+- GitOps deployment through the canonical Kubernetes and shared-library repositories;
+- a required repository-local hardening binding path;
+- immutable source revisions and content digests for every downstream binding.
+
 ## Safe rollout
 
 1. Register and install the Apps in `*-test` organizations.
