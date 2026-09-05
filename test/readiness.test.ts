@@ -49,6 +49,15 @@ describe('readiness gates', () => {
     assert.match(r.reason, /never a side-pick/);
   });
 
+  test('a conflicted draft is held rather than escalated', () => {
+    const r = evaluate({
+      pr: pull({ draft: true, mergeable: false, mergeable_state: 'dirty' }),
+      ...clean,
+    });
+    assert.equal(r.recommendation, 'hold');
+    assert.match(r.reason, /protected from automation by not-draft/);
+  });
+
   test('changes-requested blocks even after a later approval by someone else', () => {
     const r = evaluate({
       pr: pull(),
@@ -120,6 +129,15 @@ describe('readiness gates', () => {
       const r = evaluate({ pr: pull({ labels: [{ name }] }), ...clean });
       assert.ok(r.blockedBy.includes('no-hold-label'), `${name} should block`);
     }
+  });
+
+  test('a hold-labelled behind PR is held rather than updated', () => {
+    const r = evaluate({
+      pr: pull({ labels: [{ name: 'hold' }], mergeable_state: 'behind' }),
+      ...clean,
+    });
+    assert.equal(r.recommendation, 'hold');
+    assert.match(r.reason, /protected from automation by no-hold-label/);
   });
 
   test('draft PRs are never merged', () => {
