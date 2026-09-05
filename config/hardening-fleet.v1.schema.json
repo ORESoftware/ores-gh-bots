@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ORESoftware/ores-gh-bots/blob/main/config/hardening-fleet.v1.schema.json",
+  "title": "ORES fleet-hardening policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "api_version", "kind", "metadata", "spec"],
+  "properties": {
+    "$schema": {
+      "const": "./hardening-fleet.v1.schema.json"
+    },
+    "api_version": {
+      "const": "ores.dev/fleet-hardening/v1"
+    },
+    "kind": {
+      "const": "FleetHardeningPolicy"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "const": "ores-fleet-hardening"
+        },
+        "version": {
+          "const": "1.0.0"
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sql", "kubernetes", "repository", "supply_chain"],
+      "properties": {
+        "sql": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authority", "namespace_pattern", "migration_registry", "diesel_model", "seaorm_model"],
+          "properties": {
+            "authority": {
+              "const": "organization-local-with-central-mirror"
+            },
+            "namespace_pattern": {
+              "const": "^[a-z][a-z0-9_]{0,62}$"
+            },
+            "migration_registry": {
+              "const": "declarative-migrations/declarative-postgres-migrate.rs"
+            },
+            "diesel_model": {
+              "const": "code-first"
+            },
+            "seaorm_model": {
+              "const": "database-first"
+            }
+          }
+        },
+        "kubernetes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cluster_repository", "shared_library_repository", "deployment_model"],
+          "properties": {
+            "cluster_repository": {
+              "const": "ORESoftware/k8s-cluster"
+            },
+            "shared_library_repository": {
+              "const": "ORESoftware/k8s-libs-and-shared-defs"
+            },
+            "deployment_model": {
+              "const": "gitops"
+            }
+          }
+        },
+        "repository": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["binding_path", "fail_closed"],
+          "properties": {
+            "binding_path": {
+              "const": ".ores/repository-hardening.v1.json"
+            },
+            "fail_closed": {
+              "const": true
+            }
+          }
+        },
+        "supply_chain": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source_revision_required", "content_sha256_required"],
+          "properties": {
+            "source_revision_required": {
+              "const": true
+            },
+            "content_sha256_required": {
+              "const": true
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -21,7 +21,8 @@
     "check": "npm run lint && npm test",
     "verify:repository": "node scripts/verify-repository.mjs",
     "verify:github-apps": "node scripts/verify-github-apps.mjs",
-    "verify": "npm run verify:repository && npm run verify:github-apps"
+    "verify:fleet-hardening": "node scripts/verify-fleet-hardening.mjs",
+    "verify": "npm run verify:repository && npm run verify:github-apps && npm run verify:fleet-hardening"
   },
   "license": "MIT"
 }
