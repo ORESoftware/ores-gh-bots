@@ -118,12 +118,20 @@ export function evaluate(input: ReadinessInput): Readiness {
     : Object.values(signals).reduce((a, b) => a * b, 1);
 
   const mergeable = blockedBy.length === 0 && confidence >= MERGE_CONFIDENCE_THRESHOLD;
+  const protectedFromAutomation = blockedBy.filter(
+    (gate) => gate === 'not-draft' || gate === 'no-hold-label',
+  );
 
   let recommendation: Readiness['recommendation'];
   let reason: string;
   if (mergeable) {
     recommendation = 'merge';
     reason = `all gates passed, confidence ${(confidence * 100).toFixed(2)}%`;
+  } else if (protectedFromAutomation.length) {
+    // Draft and explicitly held PRs are immutable to this unattended job. This
+    // guard must precede both conflict escalation and update-branch handling.
+    recommendation = 'hold';
+    reason = `protected from automation by ${protectedFromAutomation.join(', ')}`;
   } else if (blockedBy.includes('no-conflicts')) {
     recommendation = 'escalate';
     reason = 'merge conflict — needs semantic resolution, never a side-pick';
@@ -142,4 +150,3 @@ export function evaluate(input: ReadinessInput): Readiness {
 
   return { gates, blockedBy, confidence, signals, mergeable, recommendation, reason };
 }
-
