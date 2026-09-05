@@ -11,3 +11,10 @@ env/dec/*
 !env/dec/.gitkeep
 result/
 .DS_Store
+
+# nightly reconciler / hygiene / typecheck artifacts
+dist/
+*.tsbuildinfo
+reconcile-report.json
+tmp/
+tmp/worktrees/
