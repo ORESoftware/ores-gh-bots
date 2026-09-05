@@ -66,6 +66,14 @@ describe('reconcilePull', () => {
     assert.ok(!gh.calls.includes('merge'));
   });
 
+  test('a conflicted draft is never labelled or commented', async () => {
+    const conflictedDraft = pull({ draft: true, mergeable: false, mergeable_state: 'dirty' });
+    const gh = fakeClient({ pr: conflictedDraft });
+    const out = await reconcilePull(gh, 'o', 'r', conflictedDraft, ctx(false));
+    assert.equal(out.action, 'held');
+    assert.deepEqual(gh.calls, [], 'draft PRs must remain immutable to unattended automation');
+  });
+
   test('an already-flagged conflict is not re-commented on every night', async () => {
     const conflicted = pull({
       mergeable: false,
@@ -84,6 +92,14 @@ describe('reconcilePull', () => {
     const out = await reconcilePull(gh, 'o', 'r', behind, ctx(false));
     assert.equal(out.action, 'updated');
     assert.deepEqual(gh.calls, ['updateBranch']);
+  });
+
+  test('a hold-labelled behind branch is never updated', async () => {
+    const heldBehind = pull({ labels: [{ name: 'hold' }], mergeable_state: 'behind' });
+    const gh = fakeClient({ pr: heldBehind });
+    const out = await reconcilePull(gh, 'o', 'r', heldBehind, ctx(false));
+    assert.equal(out.action, 'held');
+    assert.deepEqual(gh.calls, [], 'held PRs must remain immutable to unattended automation');
   });
 
   test('a refused update-branch becomes an escalation, not a silent success', async () => {
