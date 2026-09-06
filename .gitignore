@@ -11,3 +11,5 @@ env/dec/*
 !env/dec/.gitkeep
 result/
 .DS_Store
+tmp/
+temp/
