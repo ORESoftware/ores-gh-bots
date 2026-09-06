@@ -23,21 +23,19 @@ function indentationWidth(line) {
 }
 
 function shellBodies(source) {
-  const lines = source.split('\n');
+  const lines = source.split(/\r?\n/u);
   const bodies = [];
 
   for (let index = 0; index < lines.length; index += 1) {
-    const match = /^(\s*)run:\s*(.*)$/u.exec(lines[index]);
+    const match = /^([ \t]*(?:-[ \t]+)?)(?:run|"run"|'run'):[ \t]*(.*)$/u.exec(lines[index]);
     if (!match) continue;
 
+    // Include the sequence marker: sibling env/shell keys align with run,
+    // not with the dash. Otherwise safe env values become shell source.
     const runIndent = match[1].length;
     const suffix = match[2].trim();
-    if (suffix !== '' && !/^[>|]/u.test(suffix)) {
-      bodies.push(suffix);
-      continue;
-    }
-
-    const body = [];
+    // Quoted/plain inline scalars may continue on subsequent indented lines.
+    const body = suffix !== '' && !/^[>|]/u.test(suffix) ? [suffix] : [];
     for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
       const line = lines[cursor];
       if (line.trim() !== '' && indentationWidth(line) <= runIndent) break;
@@ -91,4 +89,71 @@ test('fleet workflow authority never falls back to a personal access token', asy
       `${workflow.name} must use a least-privilege GitHub App identity for cross-repository effects`,
     );
   }
+});
+
+// These fixtures exercise the guard itself, not only today's workflow contents.
+// This is a block-style workflow regression scanner, not a general YAML parser.
+const UNSAFE_INPUT = '${{ inputs.payload }}';
+const UNSAFE_TITLE = '${{ github.event.pull_request.title }}';
+
+for (const [name, source] of [
+  ['list-leading inline run', `steps:\n  - run: echo "${UNSAFE_INPUT}"`],
+  ['list-leading literal run', `steps:\n  - run: |\n      echo "${UNSAFE_TITLE}"`],
+  ['list-leading folded run', `steps:\n  - run: >-\n      echo\n      "${UNSAFE_INPUT}"`],
+  ['named-step run', `steps:\n  - name: example\n    run: echo "${UNSAFE_INPUT}"`],
+  ['single-quoted run key', `steps:\n  - 'run': echo "${UNSAFE_INPUT}"`],
+  ['double-quoted run key', `steps:\n  - "run": echo "${UNSAFE_INPUT}"`],
+  ['inline scalar continuation', `steps:\n  - run: echo\n      "${UNSAFE_INPUT}"`],
+  ['quoted scalar continuation', `steps:\n  - run: 'echo\n      ${UNSAFE_INPUT}'`],
+  ['CRLF literal run', `steps:\r\n  - run: |+\r\n\r\n      echo "${UNSAFE_INPUT}"\r\n`],
+]) {
+  test(`shell-body guard detects ${name}`, () => {
+    const bodies = shellBodies(source);
+    assert.equal(bodies.length, 1, 'the shell step must not disappear');
+    assert.match(bodies[0], UNTRUSTED_EXPRESSION_IN_SHELL);
+  });
+}
+
+test('list-leading block stops before the sibling env mapping', () => {
+  const bodies = shellBodies([
+    'steps:',
+    '  - run: |',
+    '      echo "$PAYLOAD"',
+    '    env:',
+    `      PAYLOAD: ${UNSAFE_INPUT}`,
+    '  - run: echo second',
+  ].join('\n'));
+  assert.deepEqual(bodies, ['      echo "$PAYLOAD"', 'echo second']);
+  for (const body of bodies) assert.doesNotMatch(body, UNTRUSTED_EXPRESSION_IN_SHELL);
+});
+
+test('safe env mappings before a run remain outside shell source', () => {
+  const bodies = shellBodies([
+    'steps:',
+    '  - env:',
+    `      PAYLOAD: ${UNSAFE_INPUT}`,
+    '    run: echo "$PAYLOAD"',
+    '    shell: bash',
+  ].join('\n'));
+  assert.deepEqual(bodies, ['echo "$PAYLOAD"']);
+  assert.doesNotMatch(bodies[0], UNTRUSTED_EXPRESSION_IN_SHELL);
+});
+
+test('adjacent shell steps are each inspected after a block boundary', () => {
+  const bodies = shellBodies([
+    'steps:',
+    '  - run: |-',
+    '      echo first',
+    '',
+    `  - run: echo "${UNSAFE_INPUT}"`,
+    '  - name: third',
+    '    run: echo third',
+  ].join('\n'));
+  assert.equal(bodies.length, 3);
+  assert.match(bodies[1], UNTRUSTED_EXPRESSION_IN_SHELL);
+  assert.equal(bodies[2], 'echo third');
+});
+
+test('non-shell steps and commented run keys do not create shell bodies', () => {
+  assert.deepEqual(shellBodies('steps:\n  # - run: ignored\n  - uses: ./action\n'), []);
 });
