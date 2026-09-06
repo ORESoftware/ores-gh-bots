@@ -11,3 +11,10 @@ env/dec/*
 !env/dec/.gitkeep
 result/
 .DS_Store
+
+# --- carried over from the grafted branch rescue/main-local-20260904 ---
+*.tsbuildinfo
+dist/
+reconcile-report.json
+tmp/
+tmp/worktrees/

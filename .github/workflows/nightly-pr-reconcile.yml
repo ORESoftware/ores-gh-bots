@@ -1,0 +1,72 @@
+name: nightly-pr-reconcile
+
+# GitHub Actions cron is UTC-only, and America/Chicago moves between UTC-6 (CST)
+# and UTC-5 (CDT). Both candidate hours are scheduled and the job itself decides
+# which one is really 1am in Chicago — including on the autumn fall-back date,
+# when 1am happens twice and only the first occurrence is allowed to run.
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 1am CDT (summer)
+    - cron: '0 7 * * *'   # 1am CST (winter)
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Actually merge/update/comment (otherwise dry run)'
+        type: boolean
+        default: false
+      org:
+        description: 'Comma-separated orgs to limit the run to'
+        type: string
+        default: ''
+      ignore_schedule:
+        description: 'Run even outside the scheduled hour'
+        type: boolean
+        default: true
+
+concurrency:
+  group: nightly-pr-reconcile
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Self-test
+        run: node --experimental-strip-types --test test/*.test.ts
+
+      - name: Reconcile
+        env:
+          # A fleet-scoped token: the default GITHUB_TOKEN only reaches this repo.
+          GITHUB_TOKEN: ${{ secrets.FLEET_PR_TOKEN }}
+          LOG_LEVEL: info
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            [ "${{ inputs.apply }}" = "true" ] && args+=(--apply) || args+=(--dry-run)
+            [ "${{ inputs.ignore_schedule }}" = "true" ] && args+=(--ignore-schedule)
+            [ -n "${{ inputs.org }}" ] && args+=(--org "${{ inputs.org }}")
+          else
+            args+=(--apply)
+          fi
+          node --experimental-strip-types src/cli.ts "${args[@]}" | tee reconcile-report.json
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reconcile-report
+          path: reconcile-report.json
+          retention-days: 30
