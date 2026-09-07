@@ -69,6 +69,44 @@ function decodeBase64(content, expectedSize, path) {
   return bytes;
 }
 
+async function loadArtifactBytes(client, token, owner, repo, artifact, path) {
+  if (artifact.encoding === 'base64' && typeof artifact.content === 'string') {
+    return decodeBase64(artifact.content, artifact.size, path);
+  }
+  if (artifact.encoding !== 'none' && artifact.encoding !== null && artifact.encoding !== undefined) {
+    artifactError(
+      'contract_artifact_encoding_invalid',
+      `artifact ${path} has unsupported inline encoding`,
+    );
+  }
+
+  const response = await client.request(
+    'GET',
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs/${artifact.sha}`,
+    { token },
+  );
+  const blob = response.data;
+  if (!blob || Array.isArray(blob) || blob.sha !== artifact.sha) {
+    artifactError(
+      'contract_artifact_blob_mismatch',
+      `artifact ${path} Git blob identity is mismatched`,
+    );
+  }
+  if (!Number.isSafeInteger(blob.size) || blob.size !== artifact.size) {
+    artifactError(
+      'contract_artifact_blob_size_mismatch',
+      `artifact ${path} Git blob size is mismatched`,
+    );
+  }
+  if (blob.encoding !== 'base64' || typeof blob.content !== 'string') {
+    artifactError(
+      'contract_artifact_blob_encoding_invalid',
+      `artifact ${path} Git blob is not base64 encoded`,
+    );
+  }
+  return decodeBase64(blob.content, artifact.size, path);
+}
+
 export async function fetchRepositoryTextFileAtCommit(
   client,
   token,
@@ -114,13 +152,7 @@ export async function fetchRepositoryTextFileAtCommit(
       `artifact ${path} exceeds the configured byte boundary`,
     );
   }
-  if (artifact.encoding !== 'base64' || typeof artifact.content !== 'string') {
-    artifactError(
-      'contract_artifact_encoding_invalid',
-      `artifact ${path} is not inline base64 content`,
-    );
-  }
-  const bytes = decodeBase64(artifact.content, artifact.size, path);
+  const bytes = await loadArtifactBytes(client, token, owner, repo, artifact, path);
   let text;
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
