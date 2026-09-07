@@ -163,12 +163,140 @@ export function canonicalStringifyTsjsvV1OrNull(value) {
   return canonicalStringifyTsjsvV1(value ?? null);
 }
 
+function scanJsonStructure(text, label, maximumDepth = 128) {
+  let index = 0;
+
+  const syntaxError = () => fail('artifact_json', `${label} is not valid JSON`);
+  const skipWhitespace = () => {
+    while (
+      text[index] === ' ' ||
+      text[index] === '\n' ||
+      text[index] === '\r' ||
+      text[index] === '\t'
+    ) {
+      index += 1;
+    }
+  };
+  const parseString = () => {
+    if (text[index] !== '"') syntaxError();
+    const start = index;
+    index += 1;
+    while (index < text.length) {
+      const character = text[index];
+      if (character === '"') {
+        index += 1;
+        try {
+          return JSON.parse(text.slice(start, index));
+        } catch {
+          return syntaxError();
+        }
+      }
+      if (character === '\\') {
+        index += 1;
+        if (index >= text.length) syntaxError();
+        const escape = text[index];
+        if (escape === 'u') {
+          const code = text.slice(index + 1, index + 5);
+          if (!/^[a-fA-F0-9]{4}$/u.test(code)) syntaxError();
+          index += 5;
+          continue;
+        }
+        if (!'["\\/bfnrt]'.includes(escape)) syntaxError();
+        index += 1;
+        continue;
+      }
+      if (character.charCodeAt(0) < 0x20) syntaxError();
+      index += 1;
+    }
+    return syntaxError();
+  };
+  const parseNumber = () => {
+    const match = text.slice(index).match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/u);
+    if (!match) syntaxError();
+    index += match[0].length;
+  };
+  const parseLiteral = (literal) => {
+    if (!text.startsWith(literal, index)) syntaxError();
+    index += literal.length;
+  };
+  const parseValue = (depth) => {
+    skipWhitespace();
+    const character = text[index];
+    if (character === '{') return parseObject(depth + 1);
+    if (character === '[') return parseArray(depth + 1);
+    if (character === '"') return parseString();
+    if (character === 't') return parseLiteral('true');
+    if (character === 'f') return parseLiteral('false');
+    if (character === 'n') return parseLiteral('null');
+    return parseNumber();
+  };
+  const parseObject = (depth) => {
+    if (depth > maximumDepth) {
+      fail('artifact_depth', `${label} exceeds the maximum JSON nesting depth of ${maximumDepth}`);
+    }
+    index += 1;
+    skipWhitespace();
+    if (text[index] === '}') {
+      index += 1;
+      return;
+    }
+    const keys = new Set();
+    while (index < text.length) {
+      skipWhitespace();
+      const key = parseString();
+      if (keys.has(key)) {
+        fail('artifact_duplicate_key', `${label} contains duplicate JSON key ${JSON.stringify(key)}`);
+      }
+      keys.add(key);
+      skipWhitespace();
+      if (text[index] !== ':') syntaxError();
+      index += 1;
+      parseValue(depth);
+      skipWhitespace();
+      if (text[index] === '}') {
+        index += 1;
+        return;
+      }
+      if (text[index] !== ',') syntaxError();
+      index += 1;
+    }
+    return syntaxError();
+  };
+  const parseArray = (depth) => {
+    if (depth > maximumDepth) {
+      fail('artifact_depth', `${label} exceeds the maximum JSON nesting depth of ${maximumDepth}`);
+    }
+    index += 1;
+    skipWhitespace();
+    if (text[index] === ']') {
+      index += 1;
+      return;
+    }
+    while (index < text.length) {
+      parseValue(depth);
+      skipWhitespace();
+      if (text[index] === ']') {
+        index += 1;
+        return;
+      }
+      if (text[index] !== ',') syntaxError();
+      index += 1;
+    }
+    return syntaxError();
+  };
+
+  parseValue(0);
+  skipWhitespace();
+  if (index !== text.length) syntaxError();
+}
+
 export function parseArtifact(text, label, maxArtifactBytes) {
   if (typeof text !== 'string') fail('artifact_missing', `${label} text is required`);
   const bytes = Buffer.byteLength(text, 'utf8');
   if (bytes < 2 || bytes > maxArtifactBytes) {
     fail('artifact_size', `${label} must be between 2 and ${maxArtifactBytes} bytes`);
   }
+  scanJsonStructure(text, label);
   try {
     return JSON.parse(text);
   } catch {
