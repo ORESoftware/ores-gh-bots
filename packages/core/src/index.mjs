@@ -10,3 +10,4 @@ export * from './events.mjs';
 export * from './log.mjs';
 export * from './metrics.mjs';
 export * from './contract-admission.mjs';
+export * from './contract-policy.mjs';

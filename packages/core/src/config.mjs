@@ -1,4 +1,5 @@
 import { DEFAULTS } from './constants.mjs';
+import { loadContractAdmissionPolicyFile } from './contract-policy.mjs';
 
 function optionalString(value) {
   const text = String(value ?? '').trim();
@@ -71,6 +72,8 @@ export function loadConfig(env = process.env) {
 
   const ownerAllowlist = csv(env.OWNER_ALLOWLIST);
   const ownerPatterns = csv(env.OWNER_PATTERNS).map((pattern) => new RegExp(pattern, 'i'));
+  const contractAdmissionPolicyPath = optionalString(env.CONTRACT_ADMISSION_POLICY_PATH);
+  const contractAdmissionPolicy = loadContractAdmissionPolicyFile(contractAdmissionPolicyPath);
 
   return {
     server: {
@@ -121,6 +124,10 @@ export function loadConfig(env = process.env) {
       requiredCiAppIds: requiredCiAppIds(env.REQUIRED_CI_APP_IDS),
       commentMode: optionalString(env.REVIEW_COMMENT_MODE) ?? 'summary',
       postPullRequestReview: boolean(env.POST_PULL_REQUEST_REVIEW, false),
+    },
+    contractAdmission: {
+      policyPath: contractAdmissionPolicyPath,
+      policy: contractAdmissionPolicy,
     },
     queue: {
       path: optionalString(env.QUEUE_PATH) ?? DEFAULTS.queuePath,
