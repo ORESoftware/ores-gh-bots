@@ -1,5 +1,52 @@
 import { CONTRACT_PROJECTION_ADMISSION_VERIFICATION_SCHEMA } from './contract-admission.mjs';
 
+const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
+const HEX_160 = /^[a-f0-9]{40}$/u;
+const HEX_256 = /^[a-f0-9]{64}$/u;
+
+function projectionContextError(projectionContext) {
+  if (
+    projectionContext === null ||
+    typeof projectionContext !== 'object' ||
+    Array.isArray(projectionContext) ||
+    !REPOSITORY.test(projectionContext.repository ?? '') ||
+    !HEX_160.test(projectionContext.headSha ?? '')
+  ) {
+    return 'current projection repository/head context is missing or invalid';
+  }
+  return null;
+}
+
+function evaluateProjectionAdmission(kind, candidates, projectionContext) {
+  if (candidates.length === 0) {
+    return { projectionKind: kind, state: 'pending', reason: 'admission evidence missing' };
+  }
+  if (candidates.length !== 1) {
+    return { projectionKind: kind, state: 'failure', reason: 'duplicate admission evidence' };
+  }
+  const admission = candidates[0];
+  if (
+    admission.schema !== CONTRACT_PROJECTION_ADMISSION_VERIFICATION_SCHEMA ||
+    admission.status !== 'passed' ||
+    admission.admissible !== true ||
+    !Array.isArray(admission.findings) ||
+    admission.findings.length !== 0 ||
+    !HEX_256.test(admission.manifestDigest ?? '') ||
+    !HEX_256.test(admission.reportRunId ?? '') ||
+    !HEX_256.test(admission.contractIrId ?? '')
+  ) {
+    const reason = admission.findings?.[0]?.code ?? admission.status ?? 'invalid admission evidence';
+    return { projectionKind: kind, state: 'failure', reason };
+  }
+  if (admission.repository !== projectionContext.repository) {
+    return { projectionKind: kind, state: 'failure', reason: 'admission repository is stale or mismatched' };
+  }
+  if (admission.headSha !== projectionContext.headSha) {
+    return { projectionKind: kind, state: 'failure', reason: 'admission head SHA is stale or mismatched' };
+  }
+  return { projectionKind: kind, state: 'success', reason: 'exact Contract IR evidence admitted' };
+}
+
 export function evaluateGate({
   reviews,
   ci = [],
@@ -7,6 +54,7 @@ export function evaluateGate({
   requiredCiAppIds = {},
   projectionAdmissions = [],
   requiredProjectionKinds = [],
+  projectionContext = null,
 }) {
   const providerStates = ['openai', 'claude'].map((provider) => {
     const review = reviews?.[provider] ?? null;
@@ -36,6 +84,14 @@ export function evaluateGate({
     return { context, state: 'failure', reason: item.state };
   });
 
+  const requiredKinds = Array.isArray(requiredProjectionKinds) ? requiredProjectionKinds : [null];
+  const duplicateRequiredKinds = new Set();
+  const seenRequiredKinds = new Set();
+  for (const kind of requiredKinds) {
+    if (seenRequiredKinds.has(kind)) duplicateRequiredKinds.add(kind);
+    seenRequiredKinds.add(kind);
+  }
+  const contextError = requiredKinds.length > 0 ? projectionContextError(projectionContext) : null;
   const admissionsByKind = new Map();
   for (const admission of Array.isArray(projectionAdmissions) ? projectionAdmissions : []) {
     const kind = admission?.projectionKind;
@@ -44,29 +100,17 @@ export function evaluateGate({
     items.push(admission);
     admissionsByKind.set(kind, items);
   }
-  const projectionStates = (Array.isArray(requiredProjectionKinds) ? requiredProjectionKinds : [null]).map((kind) => {
+  const projectionStates = requiredKinds.map((kind) => {
     if (typeof kind !== 'string' || kind === '') {
       return { projectionKind: null, state: 'failure', reason: 'invalid projection requirement' };
     }
-    const candidates = admissionsByKind.get(kind) ?? [];
-    if (candidates.length === 0) {
-      return { projectionKind: kind, state: 'pending', reason: 'admission evidence missing' };
+    if (duplicateRequiredKinds.has(kind)) {
+      return { projectionKind: kind, state: 'failure', reason: 'duplicate projection requirement' };
     }
-    if (candidates.length !== 1) {
-      return { projectionKind: kind, state: 'failure', reason: 'duplicate admission evidence' };
+    if (contextError) {
+      return { projectionKind: kind, state: 'failure', reason: contextError };
     }
-    const admission = candidates[0];
-    if (
-      admission.schema !== CONTRACT_PROJECTION_ADMISSION_VERIFICATION_SCHEMA ||
-      admission.status !== 'passed' ||
-      admission.admissible !== true ||
-      !Array.isArray(admission.findings) ||
-      admission.findings.length !== 0
-    ) {
-      const reason = admission.findings?.[0]?.code ?? admission.status ?? 'invalid admission evidence';
-      return { projectionKind: kind, state: 'failure', reason };
-    }
-    return { projectionKind: kind, state: 'success', reason: 'exact Contract IR evidence admitted' };
+    return evaluateProjectionAdmission(kind, admissionsByKind.get(kind) ?? [], projectionContext);
   });
 
   const all = [...providerStates, ...ciStates, ...projectionStates];
