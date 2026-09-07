@@ -52,8 +52,14 @@ export function validateManifest(manifest, expectedRepository, expectedHeadSha, 
   if (!Array.isArray(allowedProducerCommits) || allowedProducerCommits.length === 0) {
     fail('producer_allowlist_missing', 'at least one reviewed producer commit is required');
   }
+  if (allowedProducerCommits.length > 64) {
+    fail('invalid_expectation', 'allowedProducerCommits exceeds the maximum of 64 entries');
+  }
   if (!allowedProducerCommits.every((commit) => /^[a-f0-9]{40}$/u.test(commit))) {
     fail('invalid_expectation', 'allowedProducerCommits contains an invalid commit');
+  }
+  if (new Set(allowedProducerCommits).size !== allowedProducerCommits.length) {
+    fail('invalid_expectation', 'allowedProducerCommits contains duplicates');
   }
   if (!allowedProducerCommits.includes(producer.commit)) {
     fail('producer_commit_not_allowed', `producer commit ${producer.commit} is not reviewed`);
@@ -136,6 +142,9 @@ export function validateManifest(manifest, expectedRepository, expectedHeadSha, 
   requireHex256(validation.compilerEvidenceDigest, 'invalid_validation_evidence', 'validation.compilerEvidenceDigest');
   requireHex256(validation.fixtureEvidenceDigest, 'invalid_validation_evidence', 'validation.fixtureEvidenceDigest');
   requireRepository(validation.siblingTestRepository, 'invalid_validation_evidence', 'validation.siblingTestRepository');
+  if (validation.siblingTestRepository === expectedRepository) {
+    fail('sibling_test_repository_not_distinct', 'sibling test evidence must come from a distinct repository');
+  }
   requireHex160(validation.siblingTestCommit, 'invalid_validation_evidence', 'validation.siblingTestCommit');
   requireHex256(
     validation.siblingTestEvidenceDigest,
