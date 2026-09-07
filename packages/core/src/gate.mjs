@@ -1,4 +1,7 @@
-import { CONTRACT_PROJECTION_ADMISSION_VERIFICATION_SCHEMA } from './contract-admission.mjs';
+import {
+  CONTRACT_PROJECTION_ADMISSION_VERIFICATION_SCHEMA,
+  isLocallyVerifiedContractProjectionAdmission,
+} from './contract-admission.mjs';
 
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const HEX_160 = /^[a-f0-9]{40}$/u;
@@ -38,12 +41,27 @@ function evaluateProjectionAdmission(kind, candidates, projectionContext) {
     const reason = admission.findings?.[0]?.code ?? admission.status ?? 'invalid admission evidence';
     return { projectionKind: kind, state: 'failure', reason };
   }
-  if (admission.repository !== projectionContext.repository) {
-    return { projectionKind: kind, state: 'failure', reason: 'admission repository is stale or mismatched' };
+
+  const contextSupplied = projectionContext !== null && projectionContext !== undefined;
+  if (contextSupplied) {
+    const contextError = projectionContextError(projectionContext);
+    if (contextError) {
+      return { projectionKind: kind, state: 'failure', reason: contextError };
+    }
+    if (admission.repository !== projectionContext.repository) {
+      return { projectionKind: kind, state: 'failure', reason: 'admission repository is stale or mismatched' };
+    }
+    if (admission.headSha !== projectionContext.headSha) {
+      return { projectionKind: kind, state: 'failure', reason: 'admission head SHA is stale or mismatched' };
+    }
+  } else if (!isLocallyVerifiedContractProjectionAdmission(admission)) {
+    return {
+      projectionKind: kind,
+      state: 'failure',
+      reason: 'current projection repository/head context is missing or invalid',
+    };
   }
-  if (admission.headSha !== projectionContext.headSha) {
-    return { projectionKind: kind, state: 'failure', reason: 'admission head SHA is stale or mismatched' };
-  }
+
   return { projectionKind: kind, state: 'success', reason: 'exact Contract IR evidence admitted' };
 }
 
@@ -91,7 +109,6 @@ export function evaluateGate({
     if (seenRequiredKinds.has(kind)) duplicateRequiredKinds.add(kind);
     seenRequiredKinds.add(kind);
   }
-  const contextError = requiredKinds.length > 0 ? projectionContextError(projectionContext) : null;
   const admissionsByKind = new Map();
   for (const admission of Array.isArray(projectionAdmissions) ? projectionAdmissions : []) {
     const kind = admission?.projectionKind;
@@ -106,9 +123,6 @@ export function evaluateGate({
     }
     if (duplicateRequiredKinds.has(kind)) {
       return { projectionKind: kind, state: 'failure', reason: 'duplicate projection requirement' };
-    }
-    if (contextError) {
-      return { projectionKind: kind, state: 'failure', reason: contextError };
     }
     return evaluateProjectionAdmission(kind, admissionsByKind.get(kind) ?? [], projectionContext);
   });
