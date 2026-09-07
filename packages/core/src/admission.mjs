@@ -62,6 +62,17 @@ export function classifyWorkflowJob(job) {
     });
   }
 
+  if (conclusion === 'success' && executedStepCount === 0) {
+    return frozenResult({
+      kind: 'unknown_failure',
+      state: 'failure',
+      product_failure: false,
+      retryable_without_code_change: false,
+      reason: 'workflow job reported success without an executed step',
+      evidence,
+    });
+  }
+
   if (SUCCESS_CONCLUSIONS.has(conclusion)) {
     return frozenResult({
       kind: 'success',

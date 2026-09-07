@@ -91,6 +91,13 @@ test('treats success, neutral, and skipped conclusions as successful job evidenc
   }
 });
 
+test('a zero-step success job fails closed instead of becoming merge evidence', () => {
+  const result = classifyWorkflowJob(completedJob({ steps: [] }));
+  assert.equal(result.kind, 'unknown_failure');
+  assert.equal(result.state, 'failure');
+  assert.equal(result.retryable_without_code_change, false);
+});
+
 test('distinguishes cancellation before execution from product failure', () => {
   const result = classifyWorkflowJob(completedJob({
     conclusion: 'cancelled',
