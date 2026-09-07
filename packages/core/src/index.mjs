@@ -5,6 +5,7 @@ export * from './redact.mjs';
 export * from './review-schema.mjs';
 export * from './prompt.mjs';
 export * from './diff.mjs';
+export * from './admission.mjs';
 export * from './gate.mjs';
 export * from './events.mjs';
 export * from './log.mjs';

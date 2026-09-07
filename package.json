@@ -16,6 +16,7 @@
     "worker": "node apps/orchestrator/src/main.mjs --worker-only",
     "cli": "node apps/cli/src/main.mjs",
     "review": "node apps/runner/src/main.mjs",
+    "ci:classify": "node scripts/classify-workflow-evidence.mjs",
     "test": "node --test --test-reporter=spec",
     "lint": "node scripts/lint.mjs",
     "check": "npm run lint && npm test",
