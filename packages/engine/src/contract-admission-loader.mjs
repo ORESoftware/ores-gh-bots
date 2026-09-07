@@ -12,6 +12,7 @@ import {
 
 const TRANSIENT_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 const FAILURE_CODE = /^[a-z][a-z0-9_]{0,127}$/u;
+const HEX_160 = /^[a-f0-9]{40}$/u;
 
 function freezeResult(value) {
   return Object.freeze({
@@ -25,9 +26,16 @@ function freezeResult(value) {
 function boundedError(error) {
   const status = Number(error?.status ?? error?.response?.status ?? 0);
   if (TRANSIENT_STATUSES.has(status)) return null;
-  let code = typeof error?.code === 'string' && FAILURE_CODE.test(error.code)
+  const explicitCode = typeof error?.code === 'string' && FAILURE_CODE.test(error.code)
     ? error.code
-    : 'contract_artifact_invalid';
+    : null;
+  if (status === 0 && explicitCode === null) {
+    // Fetch/network exceptions generally have no HTTP status. Keep them in the
+    // queue retry path rather than converting a temporary transport outage into
+    // a durable contract rejection.
+    return null;
+  }
+  let code = explicitCode ?? 'contract_artifact_http_error';
   if (status === 403) code = 'contract_artifact_access_denied';
   if (status === 404) code = 'contract_artifact_missing';
   if (status === 422) code = 'contract_artifact_reference_invalid';
@@ -100,6 +108,18 @@ function failuresForPolicy(context, policy, code, message) {
   }));
 }
 
+function returnFailures({ queue, logger, context, policy, producerCheck, code, message, expiresAt }) {
+  const failures = failuresForPolicy(context, policy, code, message);
+  persistFailures(queue, context, policy, producerCheck, failures, expiresAt);
+  failures.forEach((failure) => logFailure(logger, context, failure));
+  return freezeResult({
+    policyMatched: true,
+    requiredProjectionKinds: policy.projections.map((projection) => projection.kind),
+    admissions: failures,
+    producerCheck,
+  });
+}
+
 async function fetchSharedArtifacts({ client, token, context, policy }) {
   const options = { maxBytes: policy.artifacts.maxArtifactBytes };
   const [report, contractIr] = await Promise.all([
@@ -157,6 +177,9 @@ export async function loadContractProjectionAdmissions({
   }
 
   const headSha = pullRequest?.head?.sha;
+  if (!HEX_160.test(headSha ?? '')) {
+    throw new Error('GitHub pull request head SHA is missing or invalid');
+  }
   const context = { owner, repo, repository, prNumber, headSha };
   queue.invalidateContractAdmissions({
     owner,
@@ -166,20 +189,28 @@ export async function loadContractProjectionAdmissions({
   });
   const requiredProjectionKinds = policy.projections.map((projection) => projection.kind);
   const headRepository = pullRequest?.head?.repo?.full_name;
-  if (headRepository && headRepository.toLowerCase() !== repository.toLowerCase()) {
-    const failures = failuresForPolicy(
+  if (typeof headRepository !== 'string') {
+    return returnFailures({
+      queue,
+      logger,
       context,
       policy,
-      'contract_artifact_fork_unsupported',
-      'contract evidence must be read from a same-repository exact head',
-    );
-    persistFailures(queue, context, policy, null, failures, nowMs + 5 * 60_000);
-    failures.forEach((failure) => logFailure(logger, context, failure));
-    return freezeResult({
-      policyMatched: true,
-      requiredProjectionKinds,
-      admissions: failures,
       producerCheck: null,
+      code: 'contract_artifact_head_repository_missing',
+      message: 'pull-request head repository is unavailable for exact artifact binding',
+      expiresAt: nowMs + 5 * 60_000,
+    });
+  }
+  if (headRepository.toLowerCase() !== repository.toLowerCase()) {
+    return returnFailures({
+      queue,
+      logger,
+      context,
+      policy,
+      producerCheck: null,
+      code: 'contract_artifact_fork_unsupported',
+      message: 'contract evidence must be read from a same-repository exact head',
+      expiresAt: nowMs + 5 * 60_000,
     });
   }
 
@@ -205,20 +236,15 @@ export async function loadContractProjectionAdmissions({
     });
   }
   if (producerCheck.state === 'failure') {
-    const failures = failuresForPolicy(
+    return returnFailures({
+      queue,
+      logger,
       context,
       policy,
-      producerCheck.code,
-      producerCheck.reason,
-    );
-    const expiresAt = producerCheck.expiresAt ?? nowMs + 5 * 60_000;
-    persistFailures(queue, context, policy, producerCheck, failures, expiresAt);
-    failures.forEach((failure) => logFailure(logger, context, failure));
-    return freezeResult({
-      policyMatched: true,
-      requiredProjectionKinds,
-      admissions: failures,
       producerCheck,
+      code: producerCheck.code,
+      message: producerCheck.reason,
+      expiresAt: producerCheck.expiresAt ?? nowMs + 5 * 60_000,
     });
   }
 
@@ -228,14 +254,15 @@ export async function loadContractProjectionAdmissions({
   } catch (error) {
     const failure = boundedError(error);
     if (!failure) throw error;
-    const failures = failuresForPolicy(context, policy, failure.code, failure.message);
-    persistFailures(queue, context, policy, producerCheck, failures, producerCheck.expiresAt);
-    failures.forEach((result) => logFailure(logger, context, result));
-    return freezeResult({
-      policyMatched: true,
-      requiredProjectionKinds,
-      admissions: failures,
+    return returnFailures({
+      queue,
+      logger,
+      context,
+      policy,
       producerCheck,
+      code: failure.code,
+      message: failure.message,
+      expiresAt: producerCheck.expiresAt,
     });
   }
 
