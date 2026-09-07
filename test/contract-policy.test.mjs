@@ -26,13 +26,13 @@ function policy() {
         maxCheckAgeSeconds: 86400,
       },
       artifacts: {
-        reportPath: '.ores/contracts/parity-report.json',
-        contractIrPath: '.ores/contracts/contract-ir.json',
+        reportPath: 'contracts/evidence/parity-report.json',
+        contractIrPath: 'contracts/evidence/contract-ir.json',
         maxArtifactBytes: 5 * 1024 * 1024,
       },
       projections: [{
         kind: 'protobuf',
-        manifestPath: '.ores/contracts/protobuf-admission.json',
+        manifestPath: 'contracts/evidence/protobuf-admission.json',
         requireCompleteScope: true,
       }],
     }],
@@ -44,7 +44,7 @@ test('validates, sorts, and freezes trusted repository policy', () => {
   input.repositories[0].producer.allowedCommits.push('0'.repeat(40));
   input.repositories[0].projections.push({
     kind: 'dart',
-    manifestPath: '.ores/contracts/dart-admission.json',
+    manifestPath: 'contracts/evidence/dart-admission.json',
     requireCompleteScope: false,
   });
   const validated = validateContractAdmissionPolicy(input);
