@@ -27,8 +27,10 @@ can satisfy a merge requirement, the caller should run
 The verifier checks the producer's canonical JSON digest convention, report
 coverage, zero-finding status, receipt/run binding, Contract IR self-digest,
 peer-authority roles, all three input digests and file closures, declaration and
-assertion digests, scope accounting, and exact raw artifact hashes. Paths are
-required to be normalized and relative so evidence cannot name files outside
+assertion digests, scope accounting, and exact raw artifact hashes. Duplicate
+JSON keys and artifacts nested beyond 128 levels are rejected before semantic
+validation to avoid parser-differential and resource-exhaustion ambiguity. Paths
+are required to be normalized and relative so evidence cannot name files outside
 its reviewed checkout.
 
 ## Projection-specific requirements
@@ -41,7 +43,7 @@ are fail-closed:
 - RPC/API projections require an authored operation-inventory digest.
 - A projection that records `runtimeValidatorRequired: true` must provide an
   execution-evidence digest for that validator.
-- Sibling tests are bound to an immutable repository commit.
+- Sibling tests are bound to an immutable commit in a distinct repository.
 
 The verifier requires a complete admitted declaration scope by default.
 `requireCompleteScope: false` is available only for a caller that has separately
@@ -50,10 +52,14 @@ Contract IR's own `complete: false` result.
 
 ## Merge-gate integration
 
-`evaluateGate` accepts optional `projectionAdmissions` and
-`requiredProjectionKinds`. Existing callers that require no projections keep
-identical provider/CI behavior. A required kind is pending when evidence is
-absent and fails when evidence is duplicated, malformed, or non-admissible.
+`evaluateGate` accepts optional `projectionAdmissions`,
+`requiredProjectionKinds`, and `projectionContext`. Existing callers that
+require no projections keep identical provider/CI behavior. Once a projection is
+required, the caller must provide the freshly fetched consumer repository and
+head SHA as `projectionContext`; every admitted result is re-bound to that
+context. A required kind is pending when evidence is absent and fails when the
+context is missing, the required kind or evidence is duplicated, or evidence is
+malformed, stale, or non-admissible.
 
 The verification object is not a trust identity by itself. Production callers
 must still bind the check context to the configured GitHub App identity and
