@@ -21,6 +21,21 @@ export function validateReport(report) {
   if (!Array.isArray(value.findings) || value.findings.length !== 0) {
     fail('report_findings_not_empty', 'report findings must be an empty array');
   }
+  const authorities = requireExactKeys(
+    value.authorities,
+    ['typespec', 'jsonSchema', 'generatedJsonSchema', 'precedence'],
+    new Set(['typespec', 'jsonSchema', 'generatedJsonSchema', 'precedence']),
+    'invalid_report',
+    'report.authorities',
+  );
+  if (
+    authorities.typespec !== 'independently-authored' ||
+    authorities.jsonSchema !== 'independently-authored' ||
+    authorities.generatedJsonSchema !== 'comparison-evidence-only' ||
+    authorities.precedence !== 'none'
+  ) {
+    fail('report_authority_mismatch', 'report authority roles or precedence are invalid');
+  }
   const coverage = requireObject(value.coverage, 'invalid_report', 'report.coverage');
   for (const key of [
     'directDeclarationInventory',
