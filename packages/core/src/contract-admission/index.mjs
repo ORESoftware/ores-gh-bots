@@ -16,6 +16,22 @@ import { validateContractIr } from './contract-ir.mjs';
 
 export * from './constants.mjs';
 
+const locallyVerifiedAdmissions = new WeakSet();
+
+function markLocallyVerified(result) {
+  locallyVerifiedAdmissions.add(result);
+  return result;
+}
+
+/**
+ * Return true only for an object produced by this module instance. The brand is
+ * deliberately held in a module-local WeakSet, so JSON serialization,
+ * structured cloning, or reconstruction cannot preserve it.
+ */
+export function isLocallyVerifiedContractProjectionAdmission(value) {
+  return isObject(value) && locallyVerifiedAdmissions.has(value);
+}
+
 function verifyManifestCrossBindings(manifest, reportText, contractIrText, reportEvidence, irEvidence) {
   if (sha256(reportText) !== manifest.producer.reportSha256) {
     fail('report_raw_digest_mismatch', 'manifest report SHA-256 does not match the exact report bytes');
@@ -79,16 +95,16 @@ export function verifyContractProjectionAdmission({
     const reportEvidence = validateReport(report);
     const irEvidence = validateContractIr(contractIr, reportEvidence, requireCompleteScope);
     verifyManifestCrossBindings(checkedManifest, reportText, contractIrText, reportEvidence, irEvidence);
-    return {
+    return markLocallyVerified({
       ...base,
       status: 'passed',
       admissible: true,
       reportRunId: report.runId,
       contractIrId: contractIr.irId,
       findings: [],
-    };
+    });
   } catch (error) {
-    return {
+    return markLocallyVerified({
       ...base,
       status: 'failed',
       admissible: false,
@@ -98,6 +114,6 @@ export function verifyContractProjectionAdmission({
         code: error instanceof AdmissionError ? error.code : 'internal_verifier_error',
         message: error instanceof Error ? error.message : String(error),
       }],
-    };
+    });
   }
 }
