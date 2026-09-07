@@ -14,14 +14,14 @@
         "maxCheckAgeSeconds": 86400
       },
       "artifacts": {
-        "reportPath": ".ores/contracts/parity-report.json",
-        "contractIrPath": ".ores/contracts/contract-ir.json",
+        "reportPath": "contracts/evidence/parity-report.json",
+        "contractIrPath": "contracts/evidence/contract-ir.json",
         "maxArtifactBytes": 5242880
       },
       "projections": [
         {
           "kind": "protobuf",
-          "manifestPath": ".ores/contracts/protobuf-admission.json",
+          "manifestPath": "contracts/evidence/protobuf-admission.json",
           "requireCompleteScope": true
         }
       ]
