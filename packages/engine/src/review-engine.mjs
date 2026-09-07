@@ -8,6 +8,7 @@ import {
   completeFailedCheck,
   completeGateCheck,
   completeReviewCheck,
+  completeSupersededGateCheck,
   createPullRequestReview,
   dispatchWorkflow,
   ensureInProgressCheck,
@@ -19,6 +20,7 @@ import {
 } from '../../github/src/index.mjs';
 import { reviewWithAnthropic, reviewWithOpenAI } from '../../providers/src/index.mjs';
 import { buildReviewContext } from './context.mjs';
+import { loadContractProjectionAdmissions } from './contract-admission-loader.mjs';
 
 function errorSummary(error) {
   const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
@@ -39,13 +41,25 @@ function summaryBody(reviews, gate) {
     else if (review.error) lines.push(`- ${provider}: failed — ${review.error}`);
     else lines.push(`- ${provider}: ${review.verdict} (${Math.round(review.confidence * 100)}% confidence)`);
   }
+  for (const projection of gate.projectionStates ?? []) {
+    lines.push(`- contract ${projection.projectionKind ?? 'invalid'}: ${projection.state} — ${projection.reason}`);
+  }
   lines.push(`- aggregate gate: ${gate.conclusion ?? gate.status}`);
   lines.push('', `Head SHA: \`${gate.headSha}\``);
   return lines.join('\n').slice(0, 65_000);
 }
 
 export class ReviewEngine {
-  constructor({ config, client, auth, queue, logger = createLogger({ component: 'review-engine' }), metrics = null, fetchImpl = fetch }) {
+  constructor({
+    config,
+    client,
+    auth,
+    queue,
+    logger = createLogger({ component: 'review-engine' }),
+    metrics = null,
+    fetchImpl = fetch,
+    now = Date.now,
+  }) {
     this.config = config;
     this.client = client;
     this.auth = auth;
@@ -53,6 +67,7 @@ export class ReviewEngine {
     this.logger = logger;
     this.metrics = metrics;
     this.fetchImpl = fetchImpl;
+    this.now = now;
   }
 
   async #orchestratorAccess(job) {
@@ -241,6 +256,13 @@ export class ReviewEngine {
       return { skipped: 'stale-head', currentHeadSha: pullRequest.head.sha };
     }
 
+    this.queue.invalidateContractAdmissions({
+      owner: job.owner,
+      repo: job.repo,
+      prNumber: job.prNumber,
+      currentHeadSha: pullRequest.head.sha,
+    });
+
     const gateAccess = await this.auth.repoToken('gate', job.owner, job.repo, job.installationId);
     const url = detailsUrl(this.config, job.owner, job.repo, job.prNumber, pullRequest.head.sha);
     const gateCheck = await ensureInProgressCheck({
@@ -252,7 +274,7 @@ export class ReviewEngine {
       name: CHECK_NAMES.gate,
       detailsUrl: url,
       externalId: `gate:${job.owner}/${job.repo}#${job.prNumber}@${pullRequest.head.sha}`,
-      summary: 'Waiting for both exact-SHA AI reviews and all configured CI contexts.',
+      summary: 'Waiting for exact-SHA AI reviews, configured CI, and trusted Contract IR projection evidence.',
     });
     const reviews = this.queue.getReviews({
       owner: job.owner,
@@ -261,12 +283,63 @@ export class ReviewEngine {
       headSha: pullRequest.head.sha,
     });
     const ci = await getCiSnapshot(this.client, orchestratorToken, job.owner, job.repo, pullRequest.head.sha);
+    const contractAdmission = await loadContractProjectionAdmissions({
+      config: this.config,
+      client: this.client,
+      token: orchestratorToken,
+      queue: this.queue,
+      logger: this.logger,
+      owner: job.owner,
+      repo: job.repo,
+      prNumber: job.prNumber,
+      pullRequest,
+      nowMs: this.now(),
+    });
     const evaluated = evaluateGate({
       reviews,
       ci,
       requiredCiContexts: this.config.review.requiredCiContexts,
       requiredCiAppIds: this.config.review.requiredCiAppIds,
+      projectionAdmissions: contractAdmission.admissions,
+      requiredProjectionKinds: contractAdmission.requiredProjectionKinds,
+      projectionContext: contractAdmission.requiredProjectionKinds.length
+        ? { repository: `${job.owner}/${job.repo}`, headSha: pullRequest.head.sha }
+        : null,
     });
+
+    const latest = await getPullRequest(
+      this.client,
+      orchestratorToken,
+      job.owner,
+      job.repo,
+      job.prNumber,
+    );
+    if (latest.head.sha !== pullRequest.head.sha) {
+      this.queue.invalidateContractAdmissions({
+        owner: job.owner,
+        repo: job.repo,
+        prNumber: job.prNumber,
+        currentHeadSha: latest.head.sha,
+      });
+      this.#enqueueCurrent(job, latest, 'gate');
+      await completeSupersededGateCheck({
+        client: this.client,
+        token: gateAccess.token,
+        owner: job.owner,
+        repo: job.repo,
+        checkRunId: gateCheck.id,
+        reviewedHeadSha: pullRequest.head.sha,
+        currentHeadSha: latest.head.sha,
+        detailsUrl: url,
+      });
+      this.metrics?.increment('ores_stale_gate_evaluations_total');
+      return {
+        skipped: 'head-moved-during-gate',
+        evaluatedHeadSha: pullRequest.head.sha,
+        currentHeadSha: latest.head.sha,
+      };
+    }
+
     const gate = { ...evaluated, headSha: pullRequest.head.sha };
     await completeGateCheck({
       client: this.client,
@@ -281,6 +354,12 @@ export class ReviewEngine {
       status: gate.status,
       conclusion: gate.conclusion ?? 'pending',
     });
+    for (const projection of gate.projectionStates ?? []) {
+      this.metrics?.increment('ores_contract_admission_evaluations_total', {
+        kind: projection.projectionKind ?? 'invalid',
+        state: projection.state,
+      });
+    }
 
     if (gate.status === 'completed' && this.config.review.postPullRequestReview) {
       await createPullRequestReview(this.client, orchestratorToken, job.owner, job.repo, job.prNumber, {
