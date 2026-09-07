@@ -228,9 +228,9 @@ export function makeContractAdmissionFixture({
   };
   const manifestText = jsonText(manifest);
   const paths = {
-    report: '.ores/contracts/parity-report.json',
-    contractIr: '.ores/contracts/contract-ir.json',
-    manifest: '.ores/contracts/protobuf-admission.json',
+    report: 'contracts/evidence/parity-report.json',
+    contractIr: 'contracts/evidence/contract-ir.json',
+    manifest: 'contracts/evidence/protobuf-admission.json',
   };
   const policy = {
     schema: CONTRACT_ADMISSION_POLICY_SCHEMA,
