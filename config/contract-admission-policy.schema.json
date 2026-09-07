@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/ores-gh-bots/contract-admission-policy.v1.schema.json",
+  "title": "ORES trusted Contract IR admission policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "repositories"],
+  "properties": {
+    "schema": {
+      "const": "ores.gh-bots.contract-admission-policy/v1"
+    },
+    "repositories": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/repositoryPolicy"
+      }
+    }
+  },
+  "$defs": {
+    "repository": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "gitSha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*//).+$"
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "allowedCommits",
+        "checkName",
+        "checkAppId",
+        "maxCheckAgeSeconds"
+      ],
+      "properties": {
+        "repository": {
+          "const": "ORESoftware/typespec-json-schema-validator"
+        },
+        "allowedCommits": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/gitSha"
+          }
+        },
+        "checkName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "checkAppId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxCheckAgeSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 2592000
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reportPath", "contractIrPath", "maxArtifactBytes"],
+      "properties": {
+        "reportPath": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "contractIrPath": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "maxArtifactBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 10485760
+        }
+      }
+    },
+    "projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "manifestPath", "requireCompleteScope"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "asyncapi",
+            "connect",
+            "dart",
+            "diesel",
+            "drizzle",
+            "fixtures",
+            "gleam",
+            "go",
+            "grpc",
+            "json-rpc",
+            "mocks",
+            "openapi",
+            "openrpc",
+            "protobuf",
+            "seaorm",
+            "serde",
+            "sql",
+            "trpc",
+            "wasm",
+            "wit",
+            "zod"
+          ]
+        },
+        "manifestPath": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "requireCompleteScope": {
+          "type": "boolean"
+        }
+      }
+    },
+    "repositoryPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "enabled", "producer", "artifacts", "projections"],
+      "properties": {
+        "repository": {
+          "$ref": "#/$defs/repository"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "producer": {
+          "$ref": "#/$defs/producer"
+        },
+        "artifacts": {
+          "$ref": "#/$defs/artifacts"
+        },
+        "projections": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/projection"
+          }
+        }
+      }
+    }
+  }
+}
