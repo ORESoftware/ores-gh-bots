@@ -55,6 +55,17 @@ function requireCheckName(value, label) {
   return value;
 }
 
+function requireCommittedEvidencePath(value, label) {
+  requireSafePath(value, 'invalid_contract_policy', label);
+  if (value === '.ores' || value.startsWith('.ores/')) {
+    fail(
+      'invalid_contract_policy',
+      `${label} cannot use the reserved, ignored .ores workspace path`,
+    );
+  }
+  return value;
+}
+
 function validateProducer(value, label) {
   const producer = requireExactKeys(
     value,
@@ -116,8 +127,8 @@ function validateArtifacts(value, label) {
     'invalid_contract_policy',
     label,
   );
-  requireSafePath(artifacts.reportPath, 'invalid_contract_policy', `${label}.reportPath`);
-  requireSafePath(artifacts.contractIrPath, 'invalid_contract_policy', `${label}.contractIrPath`);
+  requireCommittedEvidencePath(artifacts.reportPath, `${label}.reportPath`);
+  requireCommittedEvidencePath(artifacts.contractIrPath, `${label}.contractIrPath`);
   if (artifacts.reportPath === artifacts.contractIrPath) {
     fail('invalid_contract_policy', `${label} report and Contract IR paths must be distinct`);
   }
@@ -163,7 +174,7 @@ function validateProjections(value, reservedPaths, label) {
       fail('invalid_contract_policy', `${label} repeats projection kind ${projection.kind}`);
     }
     kinds.add(projection.kind);
-    requireSafePath(projection.manifestPath, 'invalid_contract_policy', `${projectionLabel}.manifestPath`);
+    requireCommittedEvidencePath(projection.manifestPath, `${projectionLabel}.manifestPath`);
     if (paths.has(projection.manifestPath)) {
       fail('invalid_contract_policy', `${projectionLabel}.manifestPath is not unique`);
     }
