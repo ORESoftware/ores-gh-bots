@@ -88,3 +88,9 @@ test('classifyWorkflowRun composes remote evidence with the core classifier', as
   assert.equal(result.product_failure, false);
   assert.equal(result.retryable_without_code_change, true);
 });
+
+test('job pagination starts from a path without a query string', async () => {
+  const client = mockClient();
+  await fetchWorkflowRunEvidence(client, 'token', 'owner/repo', 77);
+  assert.equal(client.calls[1].path, '/repos/owner/repo/actions/runs/77/jobs?filter=latest&per_page=100');
+});
