@@ -6,13 +6,14 @@ import {
 } from '../packages/github/src/contract-artifacts.mjs';
 
 const headSha = 'a'.repeat(40);
+const artifactPath = 'contracts/evidence/report.json';
 
 function contentClient(overrides = {}) {
   const text = overrides.text ?? '{"ok":true}\n';
   const bytes = overrides.bytes ?? Buffer.from(text, 'utf8');
   const artifact = {
     type: 'file',
-    path: '.ores/contracts/report.json',
+    path: artifactPath,
     sha: 'b'.repeat(40),
     size: bytes.length,
     encoding: 'base64',
@@ -36,14 +37,14 @@ test('fetches one UTF-8 artifact from the exact commit without redirects', async
     'token',
     'Example',
     'Widget',
-    '.ores/contracts/report.json',
+    artifactPath,
     headSha,
     { maxBytes: 1024 },
   );
   assert.equal(result.text, '{"ok":true}\n');
   assert.equal(result.blobSha, 'b'.repeat(40));
   assert.equal(Object.isFrozen(result), true);
-  assert.match(client.calls[0].path, /contents\/\.ores\/contracts\/report\.json\?ref=a{40}$/u);
+  assert.match(client.calls[0].path, /contents\/contracts\/evidence\/report\.json\?ref=a{40}$/u);
 });
 
 test('rejects unsafe paths, directories, oversized metadata, and byte-count drift', async () => {
@@ -57,7 +58,7 @@ test('rejects unsafe paths, directories, oversized metadata, and byte-count drif
       'token',
       'O',
       'R',
-      '.ores/contracts/report.json',
+      artifactPath,
       headSha,
       { maxBytes: 1024 },
     ),
@@ -69,7 +70,7 @@ test('rejects unsafe paths, directories, oversized metadata, and byte-count drif
       'token',
       'O',
       'R',
-      '.ores/contracts/report.json',
+      artifactPath,
       headSha,
       { maxBytes: 1024 },
     ),
@@ -81,7 +82,7 @@ test('rejects unsafe paths, directories, oversized metadata, and byte-count drif
       'token',
       'O',
       'R',
-      '.ores/contracts/report.json',
+      artifactPath,
       headSha,
       { maxBytes: 1024 },
     ),
@@ -96,7 +97,7 @@ test('rejects invalid base64 and non-UTF-8 artifacts', async () => {
       'token',
       'O',
       'R',
-      '.ores/contracts/report.json',
+      artifactPath,
       headSha,
       { maxBytes: 1024 },
     ),
@@ -109,7 +110,7 @@ test('rejects invalid base64 and non-UTF-8 artifacts', async () => {
       'token',
       'O',
       'R',
-      '.ores/contracts/report.json',
+      artifactPath,
       headSha,
       { maxBytes: 1024 },
     ),
