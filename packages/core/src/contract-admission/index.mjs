@@ -18,18 +18,27 @@ export * from './constants.mjs';
 
 const locallyVerifiedAdmissions = new WeakSet();
 
+function deepFreeze(value, seen = new WeakSet()) {
+  if ((value === null || typeof value !== 'object') || seen.has(value)) return value;
+  seen.add(value);
+  for (const child of Object.values(value)) deepFreeze(child, seen);
+  return Object.freeze(value);
+}
+
 function markLocallyVerified(result) {
+  deepFreeze(result);
   locallyVerifiedAdmissions.add(result);
   return result;
 }
 
 /**
- * Return true only for an object produced by this module instance. The brand is
- * deliberately held in a module-local WeakSet, so JSON serialization,
- * structured cloning, or reconstruction cannot preserve it.
+ * Return true only for the immutable object graph produced by this module
+ * instance. The brand is deliberately held in a module-local WeakSet, so JSON
+ * serialization, structured cloning, or object reconstruction cannot preserve
+ * it; deep freezing prevents post-verification mutation of the branded graph.
  */
 export function isLocallyVerifiedContractProjectionAdmission(value) {
-  return isObject(value) && locallyVerifiedAdmissions.has(value);
+  return isObject(value) && Object.isFrozen(value) && locallyVerifiedAdmissions.has(value);
 }
 
 function verifyManifestCrossBindings(manifest, reportText, contractIrText, reportEvidence, irEvidence) {
