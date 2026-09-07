@@ -3,35 +3,50 @@ const HEX_160 = /^[a-f0-9]{40}$/u;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const MAX_ARTIFACT_BYTES = 10 * 1024 * 1024;
 
+export class ContractArtifactError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = 'ContractArtifactError';
+    this.code = code;
+  }
+}
+
+function artifactError(code, message) {
+  throw new ContractArtifactError(code, message);
+}
+
 function assertRepositoryPart(value, label) {
   if (typeof value !== 'string' || !REPOSITORY_PART.test(value)) {
-    throw new TypeError(`${label} is invalid`);
+    artifactError('contract_artifact_repository_invalid', `${label} is invalid`);
   }
 }
 
 function assertHeadSha(value) {
   if (typeof value !== 'string' || !HEX_160.test(value)) {
-    throw new TypeError('headSha must be a full lowercase Git commit SHA');
+    artifactError('contract_artifact_head_invalid', 'headSha must be a full lowercase Git commit SHA');
   }
 }
 
 function assertSafePath(value) {
   if (typeof value !== 'string' || value.length < 1 || value.length > 1024) {
-    throw new TypeError('artifact path must be a bounded relative path');
+    artifactError('contract_artifact_path_invalid', 'artifact path must be a bounded relative path');
   }
   if (value.startsWith('/') || value.includes('\\') || value.includes('\0')) {
-    throw new TypeError('artifact path must be normalized and relative');
+    artifactError('contract_artifact_path_invalid', 'artifact path must be normalized and relative');
   }
   const segments = value.split('/');
   if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) {
-    throw new TypeError('artifact path contains an unsafe segment');
+    artifactError('contract_artifact_path_invalid', 'artifact path contains an unsafe segment');
   }
   return value;
 }
 
 function assertMaxBytes(value) {
   if (!Number.isSafeInteger(value) || value < 2 || value > MAX_ARTIFACT_BYTES) {
-    throw new TypeError(`maxBytes must be between 2 and ${MAX_ARTIFACT_BYTES}`);
+    artifactError(
+      'contract_artifact_limit_invalid',
+      `maxBytes must be between 2 and ${MAX_ARTIFACT_BYTES}`,
+    );
   }
 }
 
@@ -42,11 +57,14 @@ function encodeRepositoryPath(path) {
 function decodeBase64(content, expectedSize, path) {
   const normalized = content.replace(/[\r\n\t ]/gu, '');
   if (!BASE64.test(normalized)) {
-    throw new TypeError(`artifact ${path} has invalid base64 content`);
+    artifactError('contract_artifact_base64_invalid', `artifact ${path} has invalid base64 content`);
   }
   const bytes = Buffer.from(normalized, 'base64');
   if (bytes.length !== expectedSize) {
-    throw new TypeError(`artifact ${path} byte length does not match GitHub metadata`);
+    artifactError(
+      'contract_artifact_size_mismatch',
+      `artifact ${path} byte length does not match GitHub metadata`,
+    );
   }
   return bytes;
 }
@@ -73,26 +91,44 @@ export async function fetchRepositoryTextFileAtCommit(
   );
   const artifact = response.data;
   if (!artifact || Array.isArray(artifact) || artifact.type !== 'file') {
-    throw new TypeError(`artifact ${path} is not one regular repository file`);
+    artifactError(
+      'contract_artifact_not_file',
+      `artifact ${path} is not one regular repository file`,
+    );
   }
   if (artifact.path !== path) {
-    throw new TypeError(`artifact ${path} response path is mismatched`);
+    artifactError(
+      'contract_artifact_path_mismatch',
+      `artifact ${path} response path is mismatched`,
+    );
   }
   if (!HEX_160.test(artifact.sha ?? '')) {
-    throw new TypeError(`artifact ${path} is missing an immutable Git blob SHA`);
+    artifactError(
+      'contract_artifact_blob_missing',
+      `artifact ${path} is missing an immutable Git blob SHA`,
+    );
   }
   if (!Number.isSafeInteger(artifact.size) || artifact.size < 2 || artifact.size > maxBytes) {
-    throw new TypeError(`artifact ${path} exceeds the configured byte boundary`);
+    artifactError(
+      'contract_artifact_size_invalid',
+      `artifact ${path} exceeds the configured byte boundary`,
+    );
   }
   if (artifact.encoding !== 'base64' || typeof artifact.content !== 'string') {
-    throw new TypeError(`artifact ${path} is not inline base64 content`);
+    artifactError(
+      'contract_artifact_encoding_invalid',
+      `artifact ${path} is not inline base64 content`,
+    );
   }
   const bytes = decodeBase64(artifact.content, artifact.size, path);
   let text;
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
-    throw new TypeError(`artifact ${path} is not valid UTF-8`);
+    return artifactError(
+      'contract_artifact_utf8_invalid',
+      `artifact ${path} is not valid UTF-8`,
+    );
   }
   return Object.freeze({
     path,
@@ -136,16 +172,16 @@ export async function inspectProjectionProducerCheck(
   assertRepositoryPart(repo, 'repo');
   assertHeadSha(headSha);
   if (typeof checkName !== 'string' || checkName.length < 1 || checkName.length > 100) {
-    throw new TypeError('checkName is invalid');
+    artifactError('producer_check_policy_invalid', 'checkName is invalid');
   }
   if (!Number.isSafeInteger(checkAppId) || checkAppId < 1) {
-    throw new TypeError('checkAppId is invalid');
+    artifactError('producer_check_policy_invalid', 'checkAppId is invalid');
   }
   if (!Number.isSafeInteger(maxCheckAgeSeconds) || maxCheckAgeSeconds < 60) {
-    throw new TypeError('maxCheckAgeSeconds is invalid');
+    artifactError('producer_check_policy_invalid', 'maxCheckAgeSeconds is invalid');
   }
   if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
-    throw new TypeError('nowMs is invalid');
+    artifactError('producer_check_policy_invalid', 'nowMs is invalid');
   }
 
   const response = await client.request(
