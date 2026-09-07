@@ -248,6 +248,23 @@ export async function loadContractProjectionAdmissions({
     });
   }
 
+  const reconciliationWindowMs = Math.max(
+    60_000,
+    Number(config.reconciliation?.intervalMs ?? 10 * 60_000),
+  );
+  if (producerCheck.expiresAt - nowMs <= reconciliationWindowMs) {
+    return returnFailures({
+      queue,
+      logger,
+      context,
+      policy,
+      producerCheck,
+      code: 'producer_check_expiring',
+      message: 'producer check does not remain valid through the next reconciliation window',
+      expiresAt: producerCheck.expiresAt,
+    });
+  }
+
   let shared;
   try {
     shared = await fetchSharedArtifacts({ client, token, context, policy });
