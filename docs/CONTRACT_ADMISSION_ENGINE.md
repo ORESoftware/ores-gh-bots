@@ -49,24 +49,29 @@ For a configured repository the engine:
 3. requires the configured producer check on the exact head;
 4. pins that check to the configured GitHub App ID, successful conclusion, and
    freshness window;
-5. fetches the configured files through relative same-origin GitHub API paths at
-   the exact 40-character commit SHA;
-6. verifies file type, response path, Git blob SHA, byte boundary, base64
-   encoding, exact decoded size, and UTF-8;
-7. rejects ambiguous manifest JSON before semantic verification;
-8. invokes `verifyContractProjectionAdmission` with the trusted repository,
-   head SHA, producer-commit allowlist, scope requirement, exact report bytes,
-   and exact Contract IR bytes; and
-9. persists a bounded receipt keyed by repository, pull request, head SHA, and
-   projection kind.
+5. requires the check to remain valid through the next reconciliation interval,
+   preventing a success check from aging out before the control plane can
+   replace its aggregate decision;
+6. fetches configured files through relative same-origin GitHub API paths at the
+   exact 40-character commit SHA;
+7. uses inline Contents API bytes when available and otherwise follows the
+   Contents metadata to the same immutable Git blob through a relative API path;
+8. verifies file type, response path, Git blob identity and size, byte boundary,
+   base64 encoding, exact decoded size, and UTF-8;
+9. rejects ambiguous manifest JSON before semantic verification;
+10. invokes `verifyContractProjectionAdmission` with the trusted repository,
+    head SHA, producer-commit allowlist, scope requirement, exact report bytes,
+    and exact Contract IR bytes; and
+11. persists a bounded receipt keyed by repository, pull request, head SHA, and
+    projection kind.
 
 A missing or in-progress producer check keeps the projection pending. A foreign,
-failed, stale, or expired producer check fails closed. Deterministic missing or
-malformed artifact responses become bounded failures. Rate limits, server
-failures, and transport exceptions stay in the queue retry path instead of being
-recorded as semantic contract failures.
+failed, stale, expiring, or expired producer check fails closed. Deterministic
+missing or malformed artifact responses become bounded failures. Rate limits,
+server failures, and statusless transport exceptions stay in the queue retry
+path instead of being recorded as semantic contract failures.
 
-## Final publication fence
+## Final publication and freshness fences
 
 After provider, CI, and projection evaluation, the engine fetches the pull
 request again immediately before publishing the aggregate gate. If the head
@@ -76,6 +81,12 @@ moved, it:
 - queues a gate job for the new head;
 - completes the old gate as neutral with both SHAs; and
 - publishes no success or failure decision for the stale head.
+
+The existing installation reconciler also examines completed gates for configured
+repositories. It queues a new gate evaluation when a required receipt is
+missing, bound to the wrong head/repository/kind or producer identity, or will
+expire before the next reconciliation interval. An in-progress gate is left
+alone so producer-check completion remains the primary event-driven wake-up.
 
 Serialized receipt objects are audit evidence only. The gate consumes the
 immutable in-process verifier results produced during the current evaluation;
