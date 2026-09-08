@@ -89,6 +89,32 @@ aliases = ["limit"]
 type = "integer"
 help = "Maximum number of repositories to return."
 
+[commands.reviewer]
+help = "Inspect the user-bound pull-request review queue."
+
+[commands.reviewer.commands.plan]
+help = "Build a no-write reviewer plan from live GitHub state and optional bounded email hints."
+
+[commands.reviewer.commands.plan.flags.reviewer]
+env = "ORES_REVIEWER_LOGIN"
+aliases = ["reviewer"]
+type = "string"
+default = "the1mills"
+help = "Expected GitHub reviewer login; the token identity must match exactly."
+
+[commands.reviewer.commands.plan.flags.hints]
+env = "ORES_REVIEWER_HINTS_PATH"
+aliases = ["hints"]
+type = "string"
+help = "Optional local reviewer-hints/v1 JSON file produced by an inbox connector."
+
+[commands.reviewer.commands.plan.flags.limit]
+env = "ORES_CLI_LIMIT"
+aliases = ["limit"]
+type = "integer"
+default = 100
+help = "Maximum number of live pull-request candidates to inspect."
+
 [commands.rulesets]
 help = "Plan or apply the dual-review repository ruleset."
 

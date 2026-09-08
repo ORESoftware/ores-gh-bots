@@ -5,6 +5,9 @@ const DEFAULT_PROVIDER_ALLOWED_ORIGINS = [
   'https://api.anthropic.com',
 ];
 
+const REVIEWER_APPROVAL_MODES = new Set(['off', 'requested-gate-success']);
+const REVIEWER_LOGIN_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/u;
+
 function optionalString(value) {
   const text = String(value ?? '').trim();
   return text || null;
@@ -165,6 +168,12 @@ export function loadConfig(env = process.env) {
       commentMode: optionalString(env.REVIEW_COMMENT_MODE) ?? 'summary',
       postPullRequestReview: boolean(env.POST_PULL_REQUEST_REVIEW, false),
     },
+    reviewer: {
+      login: optionalString(env.REVIEWER_LOGIN) ?? 'the1mills',
+      token: optionalString(env.GITHUB_REVIEWER_TOKEN),
+      approvalMode: optionalString(env.REVIEWER_APPROVAL_MODE) ?? 'off',
+      maxItems: integer(env.REVIEWER_MAX_ITEMS, 100, { min: 1, max: 100 }),
+    },
     queue: {
       path: optionalString(env.QUEUE_PATH) ?? DEFAULTS.queuePath,
       pollMs: integer(env.QUEUE_POLL_MS, DEFAULTS.queuePollMs, { min: 50 }),
@@ -210,12 +219,24 @@ export function validateRuntimeConfig(config, { webhook = true, providers = true
     if (!config.apps.actions.id) missing.push('ACTIONS_APP_ID');
     if (!config.apps.actions.privateKey) missing.push('ACTIONS_APP_PRIVATE_KEY');
   }
+  if (config.reviewer.approvalMode === 'requested-gate-success' && !config.reviewer.token) {
+    missing.push('GITHUB_REVIEWER_TOKEN');
+  }
   if (missing.length) throw new Error(`Missing required configuration: ${missing.join(', ')}`);
 
   if (providers) {
     const allowedOrigins = config.security?.providerAllowedOrigins ?? DEFAULT_PROVIDER_ALLOWED_ORIGINS;
     validateProviderBaseUrl('OpenAI', config.providers.openai.baseUrl, allowedOrigins);
     validateProviderBaseUrl('Anthropic', config.providers.anthropic.baseUrl, allowedOrigins);
+  }
+
+  if (!REVIEWER_APPROVAL_MODES.has(config.reviewer.approvalMode)) {
+    throw new Error(`Unsupported REVIEWER_APPROVAL_MODE: ${config.reviewer.approvalMode}`);
+  }
+  if (!REVIEWER_LOGIN_PATTERN.test(config.reviewer.login)
+    || config.reviewer.login.endsWith('-')
+    || config.reviewer.login.includes('--')) {
+    throw new Error('REVIEWER_LOGIN is invalid');
   }
 
   if (!config.security?.allowSharedAppIdentity) {

@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-import { readFile } from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   AppAuth,
+  buildReviewerQueue,
   buildRulesetPayload,
   GitHubClient,
   listAppInstallations,
   listInstallationRepositories,
+  REVIEWER_HINTS_MAX_BYTES,
   upsertRepositoryRuleset,
 } from '../../../packages/github/src/index.mjs';
 import {
@@ -23,6 +25,20 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 async function readJson(path) {
   return JSON.parse(await readFile(resolve(root, path), 'utf8'));
+}
+
+async function readReviewerHints(path) {
+  const absolute = resolve(root, path);
+  const info = await lstat(absolute);
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error('reviewer hints path must be a regular file');
+  if (info.size > REVIEWER_HINTS_MAX_BYTES) {
+    throw new Error(`reviewer hints file exceeds ${REVIEWER_HINTS_MAX_BYTES} bytes`);
+  }
+  const text = await readFile(absolute, 'utf8');
+  if (Buffer.byteLength(text, 'utf8') > REVIEWER_HINTS_MAX_BYTES) {
+    throw new Error(`reviewer hints file exceeds ${REVIEWER_HINTS_MAX_BYTES} bytes`);
+  }
+  return JSON.parse(text);
 }
 
 async function discover({ config, client, auth, limit = Infinity }) {
@@ -55,6 +71,7 @@ function usage() {
   console.error(`Usage:
   npm run cli -- manifest print ROLE
   npm run cli -- fleet discover [--limit N]
+  npm run cli -- reviewer plan [--reviewer LOGIN] [--hints FILE] [--limit N]
   npm run cli -- rulesets plan|apply [--repository OWNER/REPO] [--enforcement disabled|evaluate|active] [--branch-mode all|protected] [--limit N]
 `);
 }
@@ -81,6 +98,20 @@ if (group === 'manifest' && action === 'print') {
   const auth = new AppAuth({ client, apps: config.apps, logger });
   const repositories = await discover({ config, client, auth, limit: Number(values.ORES_CLI_LIMIT ?? config.reconciliation.maxRepos) });
   console.log(JSON.stringify({ count: repositories.length, repositories }, null, 2));
+} else if (group === 'reviewer' && action === 'plan') {
+  if (!config.reviewer.token) throw new Error('GITHUB_REVIEWER_TOKEN is required for reviewer queue planning');
+  const client = new GitHubClient({ apiBaseUrl: config.github.apiBaseUrl, apiVersion: config.github.apiVersion });
+  const hints = values.ORES_REVIEWER_HINTS_PATH
+    ? await readReviewerHints(String(values.ORES_REVIEWER_HINTS_PATH))
+    : null;
+  const plan = await buildReviewerQueue({
+    client,
+    token: config.reviewer.token,
+    reviewerLogin: String(values.ORES_REVIEWER_LOGIN ?? config.reviewer.login),
+    hints,
+    limit: Number(values.ORES_CLI_LIMIT ?? config.reviewer.maxItems),
+  });
+  console.log(JSON.stringify(redactObject(plan), null, 2));
 } else if (group === 'rulesets' && ['plan', 'apply'].includes(action)) {
   if (!values.ORES_CLI_REPOSITORY) validateRuntimeConfig(config, { webhook: false, providers: false });
   if (!config.admin.token) throw new Error('GITHUB_ADMIN_TOKEN is required for ruleset planning/application');

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oresoftware.com/schemas/ores-gh-bots/reviewer-hints.v1.schema.json",
+  "title": "ORES GitHub reviewer inbox hints",
+  "description": "Bounded, non-authoritative GitHub pull-request hints emitted by an authenticated inbox connector.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "messages"],
+  "properties": {
+    "schema": {
+      "const": "ores.gh-bots.reviewer-hints/v1"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reviewer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 39,
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
+    },
+    "messages": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "message_id", "from"],
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,31}$"
+          },
+          "message_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "snippet": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "links": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          }
+        }
+      }
+    }
+  }
+}
