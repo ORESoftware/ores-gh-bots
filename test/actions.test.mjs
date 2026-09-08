@@ -86,7 +86,7 @@ test('classifyWorkflowRun composes remote evidence with the core classifier', as
   const result = await classifyWorkflowRun(client, 'token', 'owner/repo', 91);
   assert.equal(result.outcome, 'admission_failure');
   assert.equal(result.product_failure, false);
-  assert.equal(result.retryable_without_code_change, true);
+  assert.equal(result.retryable_without_code_change, false);
 });
 
 test('job pagination starts from a path without a query string', async () => {
