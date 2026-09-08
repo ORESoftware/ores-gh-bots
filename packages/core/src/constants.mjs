@@ -13,6 +13,7 @@ export const SUPPORTED_PULL_REQUEST_ACTIONS = new Set([
   'synchronize',
   'ready_for_review',
   'edited',
+  'review_requested',
 ]);
 
 export const REVIEW_VERDICTS = new Set(['approve', 'comment', 'request_changes']);

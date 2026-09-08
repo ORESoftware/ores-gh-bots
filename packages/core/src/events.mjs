@@ -51,8 +51,9 @@ export function routeWebhookEvent({ event, payload, policy = {} }) {
   const action = payload?.action;
 
   if (event === 'pull_request' && SUPPORTED_PULL_REQUEST_ACTIONS.has(action)) {
-    const job = prJob(payload, 'review', `pull_request.${action}`);
-    if (job) jobs.push({ ...job, force: ['reopened', 'ready_for_review', 'edited'].includes(action) });
+    const type = action === 'review_requested' ? 'gate' : 'review';
+    const job = prJob(payload, type, `pull_request.${action}`);
+    if (job) jobs.push({ ...job, force: ['reopened', 'ready_for_review', 'edited', 'review_requested'].includes(action) });
   }
 
   if (event === 'check_run') {

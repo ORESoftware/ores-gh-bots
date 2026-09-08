@@ -11,6 +11,7 @@ import {
 import { SqliteQueue } from '../../../packages/queue/src/index.mjs';
 import { ReviewEngine } from '../../../packages/engine/src/index.mjs';
 import { Reconciler, startReconciler } from './reconciler.mjs';
+import { ReviewerReconciler, startReviewerReconciler } from './reviewer-reconciler.mjs';
 import { createWebhookServer } from './server.mjs';
 import { createWorkerPool } from './worker.mjs';
 
@@ -80,6 +81,18 @@ const reconciler = new Reconciler({
 if (config.reconciliation.enabled && !abortController.signal.aborted) {
   startReconciler(reconciler, config.reconciliation.intervalMs, abortController.signal).catch((error) => {
     logger.error('initial reconciliation failed', { error: error?.stack ?? String(error) });
+  });
+}
+
+const reviewerReconciler = new ReviewerReconciler({
+  config,
+  client,
+  logger: logger.child({ component: 'reviewer-reconciler' }),
+  metrics,
+});
+if (config.reviewer.approvalMode !== 'off' && !abortController.signal.aborted) {
+  startReviewerReconciler(reviewerReconciler, config.reconciliation.intervalMs, abortController.signal).catch((error) => {
+    logger.error('initial bound reviewer reconciliation failed', { error: error?.stack ?? String(error) });
   });
 }
 ready = !abortController.signal.aborted;
