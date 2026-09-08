@@ -27,6 +27,22 @@ function validatePullRequest(pullRequest, reviewer, headSha, requireRequested) {
   if (requireRequested && !pullRequestRequestsReviewer(pullRequest, reviewer)) throw new Error('reviewer is no longer requested on the pull request');
 }
 
+function existingReviewResult(review, headSha) {
+  if (review?.state === 'APPROVED') {
+    return Object.freeze({ status: 'already-submitted', review_id: review.id ?? null, head_sha: headSha });
+  }
+  if (review?.state === 'CHANGES_REQUESTED') {
+    throw new Error('reviewer has requested changes on the current pull request head');
+  }
+  return null;
+}
+
+function requireCountingPermission(permission) {
+  if (!COUNTING_PERMISSIONS.has(permission)) {
+    throw new Error('reviewer lacks write-or-stronger permission required for a counting review');
+  }
+}
+
 async function verifyGate(client, token, owner, repo, prNumber, headSha, gateCheckRunId, gateAppId) {
   const response = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/check-runs/${gateCheckRunId}`, { token });
   const check = response.data;
@@ -70,12 +86,26 @@ export async function submitBoundReviewerApproval({
     getReviewerPermission(client, token, safeOwner, safeRepo, identity.login),
   ]);
   const current = currentHeadReview(allReviews, identity.login, headSha);
-  if (current?.state === 'APPROVED') return Object.freeze({ status: 'already-submitted', review_id: current.id ?? null, head_sha: headSha });
+  const existing = existingReviewResult(current, headSha);
+  if (existing) return existing;
   if (!pullRequestRequestsReviewer(initial, identity.login)) throw new Error('reviewer is no longer requested on the pull request');
-  if (!COUNTING_PERMISSIONS.has(collaboratorPermission)) throw new Error('reviewer lacks write-or-stronger permission required for a counting review');
+  requireCountingPermission(collaboratorPermission);
   await verifyGate(client, token, safeOwner, safeRepo, number, headSha, runId, appId);
-  const latest = await getPullRequest(client, token, safeOwner, safeRepo, number);
+
+  // Re-read every mutable authorization input immediately before the POST.
+  // This prevents the automation from overwriting a manual change request or
+  // relying on a reviewer request/permission that changed while gate evidence
+  // was being verified.
+  const [latest, latestReviews, latestPermission] = await Promise.all([
+    getPullRequest(client, token, safeOwner, safeRepo, number),
+    listPullRequestReviews(client, token, safeOwner, safeRepo, number),
+    getReviewerPermission(client, token, safeOwner, safeRepo, identity.login),
+  ]);
   validatePullRequest(latest, identity.login, headSha, true);
+  const latestExisting = existingReviewResult(currentHeadReview(latestReviews, identity.login, headSha), headSha);
+  if (latestExisting) return latestExisting;
+  requireCountingPermission(latestPermission);
+
   const reviewBody = `${summary}\n\n---\nAutomated review submitted by ORES GitHub Bots for @${identity.login}. `
     + `Bound to exact head \`${headSha}\` and successful aggregate gate check run \`${runId}\`.`;
   const response = await client.request('POST', `/repos/${encodeURIComponent(safeOwner)}/${encodeURIComponent(safeRepo)}/pulls/${number}/reviews`, {
