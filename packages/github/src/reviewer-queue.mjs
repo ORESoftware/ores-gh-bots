@@ -9,13 +9,17 @@ import {
   normalizeReviewerLogin,
   positiveInteger,
   pullRequestReference,
-  repositoryPart,
   REVIEWER_QUEUE_SCHEMA,
   sameLogin,
   SHA,
 } from './reviewer-validation.mjs';
 
 const LIVE_FETCH_CONCURRENCY = 4;
+const SOURCE_PRIORITY = Object.freeze({
+  'review-requested': 0,
+  assigned: 1,
+  mentioned: 2,
+});
 
 async function mapLimit(items, concurrency, worker) {
   const results = new Array(items.length);
@@ -30,6 +34,17 @@ async function mapLimit(items, concurrency, worker) {
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, run));
   return results;
+}
+
+function timestamp(value) {
+  const parsed = Date.parse(String(value ?? ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function sourcePriority(reference) {
+  let rank = 3;
+  for (const source of reference.sources) rank = Math.min(rank, SOURCE_PRIORITY[source] ?? 3);
+  return rank;
 }
 
 export async function assertReviewerIdentity(client, token, expectedLogin) {
@@ -73,8 +88,10 @@ export function currentHeadReview(allReviews, reviewerLogin, headSha) {
   if (!SHA.test(sha)) throw new Error('pull request head SHA is invalid');
   return (Array.isArray(allReviews) ? allReviews : [])
     .filter((review) => sameLogin(review?.user?.login, reviewer) && String(review?.commit_id ?? '').toLowerCase() === sha)
-    .filter((review) => ['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED', 'DISMISSED'].includes(review?.state))
-    .sort((left, right) => Date.parse(right?.submitted_at ?? '') - Date.parse(left?.submitted_at ?? '')
+    // COMMENTED reviews are informational and must not hide an effective
+    // approval or change request on the same head. Dismissal is decisive.
+    .filter((review) => ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(review?.state))
+    .sort((left, right) => timestamp(right?.submitted_at) - timestamp(left?.submitted_at)
       || Number(right?.id ?? 0) - Number(left?.id ?? 0))[0] ?? null;
 }
 
@@ -128,8 +145,8 @@ export async function buildReviewerQueue({ client, token, reviewerLogin = 'the1m
   const references = new Map();
   for (const [source, query] of [
     ['review-requested', `is:pr is:open archived:false review-requested:${reviewer}`],
-    ['mentioned', `is:pr is:open archived:false mentions:${reviewer}`],
     ['assigned', `is:pr is:open archived:false assignee:${reviewer}`],
+    ['mentioned', `is:pr is:open archived:false mentions:${reviewer}`],
   ]) {
     const items = await client.paginate(`/search/issues?q=${encodeURIComponent(query)}&per_page=100`, {
       token,
@@ -149,7 +166,10 @@ export async function buildReviewerQueue({ client, token, reviewerLogin = 'the1m
     references.set(id, current);
   }
   const selected = [...references.values()]
-    .sort((left, right) => candidateKey(left.owner, left.repo, left.prNumber).localeCompare(candidateKey(right.owner, right.repo, right.prNumber)))
+    // A bounded plan must never let an inbox hint or casual mention starve an
+    // explicit GitHub review request.
+    .sort((left, right) => sourcePriority(left) - sourcePriority(right)
+      || candidateKey(left.owner, left.repo, left.prNumber).localeCompare(candidateKey(right.owner, right.repo, right.prNumber)))
     .slice(0, max);
   const candidates = await mapLimit(selected, LIVE_FETCH_CONCURRENCY, async (reference) => {
     try { return await liveCandidate(client, token, reviewer, reference); }
