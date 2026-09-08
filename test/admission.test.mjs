@@ -24,17 +24,17 @@ test('classifies an action-required zero-step job as an admission failure', () =
   }));
   assert.equal(result.kind, 'admission_failure');
   assert.equal(result.product_failure, false);
-  assert.equal(result.retryable_without_code_change, true);
+  assert.equal(result.retryable_without_code_change, false);
 });
 
-test('classifies a zero-step generic failure with no runner as an admission failure', () => {
+test('keeps a zero-step generic failure with no runner unknown', () => {
   const result = classifyWorkflowJob(completedJob({
     conclusion: 'failure',
     runner_id: null,
     runner_name: null,
     steps: [],
   }));
-  assert.equal(result.kind, 'admission_failure');
+  assert.equal(result.kind, 'unknown_failure');
 });
 
 test('classifies a runner-assigned zero-step failure as infrastructure failure', () => {
@@ -70,7 +70,7 @@ test('does not count an explicitly skipped step as execution', () => {
     conclusion: 'failure',
     steps: [{ status: 'completed', conclusion: 'skipped' }],
   }));
-  assert.equal(result.kind, 'runner_infrastructure_failure');
+  assert.equal(result.kind, 'unknown_failure');
 });
 
 test('keeps a queued job pending', () => {
@@ -109,14 +109,14 @@ test('distinguishes cancellation before execution from product failure', () => {
   assert.equal(result.product_failure, false);
 });
 
-test('run-only action-required evidence remains merge-blocking and retryable', () => {
+test('run-only action-required evidence remains merge-blocking without suggesting retry', () => {
   const summary = classifyWorkflowEvidence({
     workflow_run: { status: 'completed', conclusion: 'action_required' },
     jobs: [],
   });
   assert.equal(summary.outcome, 'admission_failure');
   assert.equal(summary.merge_blocking, true);
-  assert.equal(summary.retryable_without_code_change, true);
+  assert.equal(summary.retryable_without_code_change, false);
 });
 
 test('a successful run without job evidence fails closed', () => {
