@@ -18,6 +18,8 @@ Inbox hints are accepted only when all of these conditions hold:
 
 Raw subjects, snippets, message identifiers, and non-GitHub links are not emitted in plans. Hint identifiers are one-way SHA-256-derived fingerprints. The implementation does not click email links.
 
+When the queue reaches its configured bound, explicit GitHub review requests are selected before assignments, assignments before mentions, and all authenticated GitHub signals before inbox hints. Email volume therefore cannot starve a live review request.
+
 ## Approval invariants
 
 An automated approval is rejected unless every invariant below passes immediately before mutation:
@@ -29,7 +31,10 @@ An automated approval is rejected unless every invariant below passes immediatel
 5. The reviewer has `write`, `maintain`, or `admin` permission, so the review can count.
 6. The exact gate check run has the expected name, Gate App ID, external ID, PR number, head SHA, completed state, and `success` conclusion.
 7. No matching current-head approval has already been submitted.
-8. The PR is fetched again immediately before the review POST, and the review is anchored with `commit_id`.
+8. A current-head `CHANGES_REQUESTED` review from the bound reviewer is an explicit veto and is never overwritten by automation.
+9. Informational `COMMENTED` reviews do not erase or hide an effective approval/change request on the same head.
+10. PR state, requested reviewers, collaborator permission, and current-head reviews are fetched again after gate verification immediately before the review POST.
+11. The review POST is anchored with `commit_id` to the exact expected head.
 
 Every submitted body discloses that ORES GitHub Bots performed the automation and records the exact head and gate check run. A head movement after the POST is reported as stale and retried only after the new head earns its own gate success.
 
@@ -67,6 +72,24 @@ GITHUB_REVIEWER_TOKEN='from-secret-manager' \
 ```
 
 The hints file contract is `config/reviewer-hints.schema.json`. Do not store connector exports or message bodies in the repository.
+
+## Canary evidence
+
+Before activation, preserve evidence for each negative test as well as the success path:
+
+- wrong token identity;
+- outside-owner candidate;
+- inaccessible or untrusted inbox hint;
+- self-authored, draft, or closed PR;
+- moved head or removed review request;
+- reviewer permission downgraded below `write`;
+- missing, failed, stale, or foreign-App gate check;
+- existing current-head approval;
+- current-head `CHANGES_REQUESTED` review, including one submitted during gate verification;
+- informational comment submitted after an approval;
+- queue saturation with review requests, assignments, mentions, and inbox hints.
+
+A success-path record must include repository, PR number, exact head SHA, reviewer login, collaborator permission, gate App ID, gate check-run ID, review ID, and timestamps. Never include tokens or raw mailbox content.
 
 ## Operations
 
