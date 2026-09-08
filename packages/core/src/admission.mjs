@@ -126,7 +126,7 @@ export function classifyWorkflowJob(job) {
     });
   }
 
-  if (!runnerAssigned && ADMISSION_CONCLUSIONS.has(conclusion)) {
+  if (executedStepCount === 0 && !runnerAssigned && ADMISSION_CONCLUSIONS.has(conclusion)) {
     return frozenResult({
       kind: 'admission_failure',
       state: 'failure',
@@ -137,7 +137,7 @@ export function classifyWorkflowJob(job) {
     });
   }
 
-  if (runnerAssigned && ADMISSION_CONCLUSIONS.has(conclusion)) {
+  if (executedStepCount === 0 && runnerAssigned && ADMISSION_CONCLUSIONS.has(conclusion)) {
     return frozenResult({
       kind: 'runner_infrastructure_failure',
       state: 'failure',
