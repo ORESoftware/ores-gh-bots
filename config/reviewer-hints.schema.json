@@ -18,7 +18,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 39,
-      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
+      "pattern": "^(?!-)(?!.*--)[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$"
     },
     "messages": {
       "type": "array",

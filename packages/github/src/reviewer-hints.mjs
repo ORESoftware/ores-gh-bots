@@ -12,7 +12,35 @@ import {
 
 const MAX_HINT_MESSAGES = 100;
 const MAX_HINT_LINKS = 20;
-const GITHUB_SENDER = /(?:^|[\s<])(?:notifications|noreply)@github\.com(?:[\s>]|$)/iu;
+const GITHUB_ADDRESS = '(?:notifications|noreply)@github\\.com';
+const RFC3339_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|([+-])(\d{2}):(\d{2}))$/u;
+
+function trustedGitHubSender(value) {
+  const text = String(value ?? '').trim();
+  if (!text || text.length > 512) return false;
+  return new RegExp(`^${GITHUB_ADDRESS}$`, 'iu').test(text)
+    || new RegExp(`^[^<>@\\r\\n]{1,256}\\s+${GITHUB_ADDRESS}$`, 'iu').test(text)
+    || new RegExp(`^[^<>@\\r\\n]{1,256}\\s*<${GITHUB_ADDRESS}>$`, 'iu').test(text);
+}
+
+function validRfc3339DateTime(value) {
+  const text = boundedString(value, 'reviewer hints generated_at', 64, true);
+  const match = RFC3339_DATE_TIME.exec(text);
+  if (!match) return false;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, , offsetHourText, offsetMinuteText] = match;
+  const [year, month, day, hour, minute, second] = [yearText, monthText, dayText, hourText, minuteText, secondText].map(Number);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return false;
+  if (offsetHourText !== undefined && (Number(offsetHourText) > 23 || Number(offsetMinuteText) > 59)) return false;
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(hour, minute, second, 0);
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day
+    && date.getUTCHours() === hour
+    && date.getUTCMinutes() === minute
+    && date.getUTCSeconds() === second;
+}
 
 function hintId(source, messageId, reference) {
   return createHash('sha256')
@@ -26,6 +54,9 @@ export function parseReviewerHints(document, expectedReviewer) {
   const reviewer = normalizeReviewerLogin(expectedReviewer);
   const root = plainObject(document, 'reviewer hints document', new Set(['schema', 'generated_at', 'reviewer', 'messages']));
   if (root.schema !== REVIEWER_HINTS_SCHEMA) throw new Error(`unsupported reviewer hints schema: ${String(root.schema)}`);
+  if (root.generated_at !== undefined && !validRfc3339DateTime(root.generated_at)) {
+    throw new Error('reviewer hints generated_at must be an RFC 3339 date-time');
+  }
   if (root.reviewer && !sameLogin(normalizeReviewerLogin(root.reviewer), reviewer)) {
     throw new Error('reviewer hints document is bound to a different reviewer');
   }
@@ -43,7 +74,7 @@ export function parseReviewerHints(document, expectedReviewer) {
     const from = boundedString(message.from, `reviewer hints message ${index + 1} from`, 512, true);
     const subject = boundedString(message.subject, `reviewer hints message ${index + 1} subject`, 1_000);
     const snippet = boundedString(message.snippet, `reviewer hints message ${index + 1} snippet`, 4_000);
-    if (!GITHUB_SENDER.test(from)) continue;
+    if (!trustedGitHubSender(from)) continue;
     if (message.links !== undefined && !Array.isArray(message.links)) throw new Error(`reviewer hints message ${index + 1} links must be an array`);
     const links = message.links ?? [];
     if (links.length > MAX_HINT_LINKS) throw new Error(`reviewer hints message ${index + 1} exceeds ${MAX_HINT_LINKS} links`);
