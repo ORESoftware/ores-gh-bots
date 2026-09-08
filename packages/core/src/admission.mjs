@@ -1,4 +1,5 @@
 const SUCCESS_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
+const RUN_SUCCESS_CONCLUSIONS = new Set(['success']);
 const ADMISSION_CONCLUSIONS = new Set(['action_required', 'startup_failure']);
 const FAILURE_CONCLUSIONS = new Set(['failure', 'timed_out', 'stale']);
 const STATUSES = new Set(['completed', 'queued', 'in_progress', 'waiting', 'requested', 'pending']);
@@ -205,8 +206,10 @@ export function classifyWorkflowEvidence(input = {}) {
   let outcome = classifications.length === 0
     ? runOnlyClassification(runs[0] ?? input)
     : OUTCOME_PRIORITY.find((kind) => counts[kind] > 0) ?? 'unknown_failure';
+  // Optional neutral/skipped jobs may coexist with observed successful work, but
+  // only an explicit parent run conclusion of success may certify the run.
   const runVetoes = runs.filter((run) => normalizeText(run.status, STATUSES) !== 'completed'
-    || !SUCCESS_CONCLUSIONS.has(normalizeText(run.conclusion, CONCLUSIONS)));
+    || !RUN_SUCCESS_CONCLUSIONS.has(normalizeText(run.conclusion, CONCLUSIONS)));
   if (outcome === 'success' && runVetoes.length > 0) {
     const vetoes = runVetoes.map(runOnlyClassification);
     outcome = OUTCOME_PRIORITY.find((kind) => vetoes.includes(kind)) ?? 'unknown_failure';
