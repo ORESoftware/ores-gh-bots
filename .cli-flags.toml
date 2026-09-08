@@ -112,7 +112,6 @@ help = "Optional local reviewer-hints/v1 JSON file produced by an inbox connecto
 env = "ORES_CLI_LIMIT"
 aliases = ["limit"]
 type = "integer"
-default = 100
 help = "Maximum number of live pull-request candidates to inspect."
 
 [commands.rulesets]
