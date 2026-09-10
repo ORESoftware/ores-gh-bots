@@ -11,7 +11,7 @@ import { hoursOpen } from './schedule.ts';
  * as a weighted signal would let a very clean PR buy its way past the soak time.
  *
  * Signals are probabilistic and multiply into a confidence figure, which must
- * reach 99.5% before a merge is even considered.
+ * be strictly greater than 99.5% before a merge is even considered.
  */
 
 export interface ReadinessInput {
@@ -40,6 +40,11 @@ export interface Readiness {
   readonly reason: string;
 }
 
+/** DEN-3946 is explicitly exclusive: exactly 99.5% is not enough. */
+export function confidenceClearsExclusiveThreshold(confidence: number): boolean {
+  return Number.isFinite(confidence) && confidence > MERGE_CONFIDENCE_THRESHOLD;
+}
+
 export function evaluate(input: ReadinessInput): Readiness {
   const { pr, reviews, checks, now, disturbedBy } = input;
   const age = hoursOpen(pr.created_at, now);
@@ -52,7 +57,9 @@ export function evaluate(input: ReadinessInput): Readiness {
     latestByReviewer.set(who, r);
   }
   const verdicts = [...latestByReviewer.values()];
-  const approvals = verdicts.filter((r) => r.state === 'APPROVED').length;
+  const approvals = verdicts.filter(
+    (r) => r.state === 'APPROVED' && r.user?.login !== pr.user.login,
+  ).length;
   const changesRequested = verdicts.filter((r) => r.state === 'CHANGES_REQUESTED').length;
 
   const completed = checks.filter((c) => c.status === 'completed');
@@ -105,7 +112,8 @@ export function evaluate(input: ReadinessInput): Readiness {
   // deliberately does NOT appear here: it is a gate, and scoring it twice would
   // let a long-open PR compensate for missing review or CI evidence.
   const signals: Record<string, number> = {
-    // Nobody approved. Not disqualifying on a solo fleet, but not 99.5% either.
+    // An approval must be independent of the PR author. If that evidence is
+    // absent the score can never cross the unattended-merge threshold.
     reviewed: approvals >= 1 ? 1 : 0.9,
     // No CI ran at all, so nothing positively demonstrated the change is sound.
     checkCoverage: completed.length >= 1 ? 1 : 0.7,
@@ -117,7 +125,7 @@ export function evaluate(input: ReadinessInput): Readiness {
     ? 0
     : Object.values(signals).reduce((a, b) => a * b, 1);
 
-  const mergeable = blockedBy.length === 0 && confidence >= MERGE_CONFIDENCE_THRESHOLD;
+  const mergeable = blockedBy.length === 0 && confidenceClearsExclusiveThreshold(confidence);
   const protectedFromAutomation = blockedBy.filter(
     (gate) => gate === 'not-draft' || gate === 'no-hold-label',
   );
@@ -145,7 +153,7 @@ export function evaluate(input: ReadinessInput): Readiness {
     reason = `blocked by ${blockedBy.join(', ')}`;
   } else {
     recommendation = 'hold';
-    reason = `confidence ${(confidence * 100).toFixed(2)}% below ${(MERGE_CONFIDENCE_THRESHOLD * 100).toFixed(1)}%`;
+    reason = `confidence ${(confidence * 100).toFixed(2)}% is not strictly above ${(MERGE_CONFIDENCE_THRESHOLD * 100).toFixed(1)}%`;
   }
 
   return { gates, blockedBy, confidence, signals, mergeable, recommendation, reason };
