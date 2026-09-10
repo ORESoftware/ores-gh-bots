@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ORESoftware/ores-gh-bots/contracts/den-3946-pr-reconcile/authored.schema.json",
+  "$ref": "#/$defs/PrReconcileEnvelope",
+  "$defs": {
+    "ValidatorEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "revision",
+        "authorityModel",
+        "typespecHumanAuthored",
+        "jsonSchemaHumanAuthored"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "const": "ORESoftware/typespec-json-schema-validator"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "authorityModel": {
+          "type": "string",
+          "const": "peer"
+        },
+        "typespecHumanAuthored": {
+          "type": "boolean",
+          "const": true
+        },
+        "jsonSchemaHumanAuthored": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "PolicyEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimumOpenHours",
+        "confidenceThresholdPpm",
+        "confidenceComparison",
+        "minimumConflictHistoryCommitsPerSide"
+      ],
+      "properties": {
+        "minimumOpenHours": {
+          "type": "integer",
+          "minimum": 55
+        },
+        "confidenceThresholdPpm": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "confidenceComparison": {
+          "type": "string",
+          "const": "strictly-greater-than"
+        },
+        "minimumConflictHistoryCommitsPerSide": {
+          "type": "integer",
+          "minimum": 15
+        }
+      }
+    },
+    "PullOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repo",
+        "number",
+        "title",
+        "action",
+        "reason",
+        "confidence",
+        "hoursOpen",
+        "disturbedBy"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string",
+          "minLength": 3
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "string",
+          "enum": ["merged", "updated", "escalated", "held", "skipped", "failed"]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "hoursOpen": {
+          "type": "number",
+          "minimum": 0
+        },
+        "disturbedBy": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ReconcileReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startedAt",
+        "finishedAt",
+        "dryRun",
+        "reposScanned",
+        "pullsScanned",
+        "outcomes",
+        "apiCalls"
+      ],
+      "properties": {
+        "startedAt": {
+          "type": "string"
+        },
+        "finishedAt": {
+          "type": "string"
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "reposScanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pullsScanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outcomes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PullOutcome"
+          }
+        },
+        "apiCalls": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "PrReconcileEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "trackingIssue", "validator", "policy", "report"],
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "ores.pr-reconcile-report/v1"
+        },
+        "trackingIssue": {
+          "type": "string",
+          "const": "DEN-3946"
+        },
+        "validator": {
+          "$ref": "#/$defs/ValidatorEvidence"
+        },
+        "policy": {
+          "$ref": "#/$defs/PolicyEvidence"
+        },
+        "report": {
+          "$ref": "#/$defs/ReconcileReport"
+        }
+      }
+    }
+  }
+}
