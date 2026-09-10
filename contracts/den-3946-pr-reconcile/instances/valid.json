@@ -1,0 +1,37 @@
+{
+  "schema": "ores.pr-reconcile-report/v1",
+  "trackingIssue": "DEN-3946",
+  "validator": {
+    "repository": "ORESoftware/typespec-json-schema-validator",
+    "revision": "4a5d049218adc2740d4cf78f612caf7f38f6f64c",
+    "authorityModel": "peer",
+    "typespecHumanAuthored": true,
+    "jsonSchemaHumanAuthored": true
+  },
+  "policy": {
+    "minimumOpenHours": 55,
+    "confidenceThresholdPpm": 995000,
+    "confidenceComparison": "strictly-greater-than",
+    "minimumConflictHistoryCommitsPerSide": 15
+  },
+  "report": {
+    "startedAt": "2026-09-09T06:00:00.000Z",
+    "finishedAt": "2026-09-09T06:01:00.000Z",
+    "dryRun": false,
+    "reposScanned": 1,
+    "pullsScanned": 1,
+    "outcomes": [
+      {
+        "repo": "ORESoftware/example",
+        "number": 7,
+        "title": "contract canary",
+        "action": "merged",
+        "reason": "all gates passed",
+        "confidence": 1,
+        "hoursOpen": 55,
+        "disturbedBy": []
+      }
+    ],
+    "apiCalls": 12
+  }
+}
