@@ -67,7 +67,11 @@ export interface ConflictDossier {
  * dependency movement gets the higher bounded context ceiling.
  */
 export function contextDepth(touchedFiles: number, disturbedRepos: number, relatedPulls: number): number {
-  const entanglement = touchedFiles / 10 + disturbedRepos / 2 + relatedPulls / 3;
+  // One touched file is the irreducible conflict case and therefore contributes
+  // no extra depth by itself. Additional touched files, dependency movement,
+  // and overlapping PRs increase the requested history monotonically.
+  const additionalTouchedFiles = Math.max(0, touchedFiles - 1);
+  const entanglement = additionalTouchedFiles / 10 + disturbedRepos / 2 + relatedPulls / 3;
   const span = CONFLICT_CONTEXT_COMMITS_MAX - CONFLICT_CONTEXT_COMMITS_MIN;
   const depth = CONFLICT_CONTEXT_COMMITS_MIN + Math.floor(Math.min(1, entanglement) * span);
   return Math.max(CONFLICT_CONTEXT_COMMITS_MIN, Math.min(CONFLICT_CONTEXT_COMMITS_MAX, depth));
