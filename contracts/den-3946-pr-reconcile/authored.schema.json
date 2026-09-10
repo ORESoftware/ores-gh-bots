@@ -6,6 +6,7 @@
     "ValidatorEvidence": {
       "type": "object",
       "additionalProperties": false,
+      "unevaluatedProperties": false,
       "required": [
         "repository",
         "revision",
@@ -39,6 +40,7 @@
     "PolicyEvidence": {
       "type": "object",
       "additionalProperties": false,
+      "unevaluatedProperties": false,
       "required": [
         "minimumOpenHours",
         "confidenceThresholdPpm",
@@ -68,6 +70,7 @@
     "PullOutcome": {
       "type": "object",
       "additionalProperties": false,
+      "unevaluatedProperties": false,
       "required": [
         "repo",
         "number",
@@ -92,8 +95,14 @@
           "minLength": 1
         },
         "action": {
-          "type": "string",
-          "enum": ["merged", "updated", "escalated", "held", "skipped", "failed"]
+          "anyOf": [
+            { "type": "string", "const": "merged" },
+            { "type": "string", "const": "updated" },
+            { "type": "string", "const": "escalated" },
+            { "type": "string", "const": "held" },
+            { "type": "string", "const": "skipped" },
+            { "type": "string", "const": "failed" }
+          ]
         },
         "reason": {
           "type": "string"
@@ -118,6 +127,7 @@
     "ReconcileReport": {
       "type": "object",
       "additionalProperties": false,
+      "unevaluatedProperties": false,
       "required": [
         "startedAt",
         "finishedAt",
@@ -160,6 +170,7 @@
     "PrReconcileEnvelope": {
       "type": "object",
       "additionalProperties": false,
+      "unevaluatedProperties": false,
       "required": ["schema", "trackingIssue", "validator", "policy", "report"],
       "properties": {
         "schema": {
