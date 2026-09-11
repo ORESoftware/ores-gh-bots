@@ -64,6 +64,7 @@ export class GitHubClient {
           headers: requestHeaders,
           body: body === undefined ? undefined : JSON.stringify(body),
           signal,
+          redirect: 'error',
         });
       } catch (error) {
         if (attempt < retries) {

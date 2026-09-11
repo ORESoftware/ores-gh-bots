@@ -22,3 +22,12 @@ The orchestrator uses one App only for event intake and read access. Separate re
 ## Failure behavior
 
 Provider errors, invalid structured output, missing App installation, stale SHA, or required CI failure never produce a successful gate. Rate limits and transient failures are retried with backoff. The reconciler repairs deliveries missed during downtime.
+
+## Nightly merge recovery
+
+A separate no-webhook GitHub App performs merge effects. The scheduled reaper
+discovers only allowlisted installations, requires the exact current-SHA ORES
+gate plus independent successful CI, checks mutable PR/review state twice,
+topologically orders explicit and repository dependencies, and sends an
+expected-SHA merge request. It has a hard budget of three sequential effects.
+The webhook orchestrator and workflow token cannot exercise this authority.

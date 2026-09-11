@@ -2,5 +2,10 @@
 node_modules
 coverage
 *.sqlite*
-env/dec
+env
+.env
+.env.*
+!.env.example
+*.key
+*.pem
 result

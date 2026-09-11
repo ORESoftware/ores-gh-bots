@@ -50,6 +50,18 @@ test('GitHub client refuses bearer forwarding to a different absolute origin', a
   );
 });
 
+test('GitHub requests reject implicit redirects before credentials can move', async () => {
+  let requestOptions;
+  const client = new GitHubClient({
+    fetchImpl: async (_url, options) => {
+      requestOptions = options;
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  await client.request('GET', '/user', { token: 'secret', retries: 0 });
+  assert.equal(requestOptions.redirect, 'error');
+});
+
 test('review-dispatch keeps untrusted workflow inputs out of shell source', async () => {
   const workflow = await readFile(new URL('../.github/workflows/review-dispatch.yml', import.meta.url), 'utf8');
   const runBlock = workflow.slice(workflow.indexOf('- name: Review exact pull-request head'));

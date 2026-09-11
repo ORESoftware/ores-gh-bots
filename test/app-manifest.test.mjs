@@ -15,6 +15,7 @@ const documents = {
     },
     openai: {
       name: 'ORES OpenAI Reviewer',
+      redirect_url: 'https://replace.example/github/app-manifest/callback',
       public: true,
       default_permissions: { checks: 'write', metadata: 'read' },
       default_events: [],
@@ -48,11 +49,43 @@ test('registration form writes state privately without logging its value', async
   const state = JSON.parse(await readFile(stateFile, 'utf8'));
   const html = await readFile(output, 'utf8');
   assert.equal(state.state, 'ab'.repeat(32));
+  assert.equal(state.ownerType, 'user');
+  assert.match(html, /github\.com\/settings\/apps\/new\?state=/u);
   assert.match(html, /state=abab/u);
   assert.equal(privateMode(await stat(output)), 0o600);
   assert.equal(privateMode(await stat(stateFile)), 0o600);
   assert.equal(logs.some((value) => value.includes(state.state)), false);
   assert.equal(logs.some((value) => value.includes(stateFile)), true);
+});
+
+test('registration form targets the explicit organization owner route', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ores-org-app-form-'));
+  const output = join(dir, 'openai.html');
+  const stateFile = join(dir, 'openai.state.json');
+
+  await createForm({
+    role: 'openai',
+    owner: 'example-org',
+    'owner-type': 'organization',
+    'base-url': 'https://bots.example.test',
+    output,
+    'state-file': stateFile,
+  }, {
+    now: () => fixedNow,
+    randomBytesImpl: () => Buffer.alloc(32, 0xbc),
+    loadDocuments: async () => documents,
+    log: () => {},
+  });
+
+  const html = await readFile(output, 'utf8');
+  assert.match(html, /github\.com\/organizations\/example-org\/settings\/apps\/new\?state=/u);
+  await assert.rejects(
+    createForm({ role: 'openai', owner: 'example-org', 'owner-type': 'enterprise', 'base-url': 'https://bots.example.test' }, {
+      loadDocuments: async () => documents,
+      log: () => {},
+    }),
+    /owner-type must be user or organization/u,
+  );
 });
 
 test('conversion requires matching private state and keeps code out of argv', async () => {
@@ -62,7 +95,7 @@ test('conversion requires matching private state and keeps code out of argv', as
   const output = join(dir, 'openai.env');
   const logs = [];
 
-  await createForm({ role: 'openai', owner: 'ORESoftware', output: form, 'state-file': stateFile }, {
+  await createForm({ role: 'openai', owner: 'ORESoftware', 'base-url': 'https://bots.example.test', output: form, 'state-file': stateFile }, {
     now: () => fixedNow,
     randomBytesImpl: () => Buffer.alloc(32, 0xcd),
     loadDocuments: async () => documents,
@@ -115,7 +148,7 @@ test('mismatched or expired callback state fails before GitHub is called', async
   const dir = await mkdtemp(join(tmpdir(), 'ores-app-state-'));
   const form = join(dir, 'openai.html');
   const stateFile = join(dir, 'openai.state.json');
-  await createForm({ role: 'openai', owner: 'ORESoftware', output: form, 'state-file': stateFile }, {
+  await createForm({ role: 'openai', owner: 'ORESoftware', 'base-url': 'https://bots.example.test', output: form, 'state-file': stateFile }, {
     now: () => fixedNow,
     randomBytesImpl: () => Buffer.alloc(32, 0xef),
     loadDocuments: async () => documents,
@@ -147,5 +180,8 @@ test('mismatched or expired callback state fails before GitHub is called', async
 });
 
 test('option parser rejects duplicate flags', () => {
-  assert.throws(() => parseOptions(['form', '--role', 'openai', '--role', 'gate']), /Duplicate option/u);
+  assert.throws(
+    () => parseOptions(['form', '--role', 'openai', '--role', 'gate']),
+    /flags-2-env rejected CLI input/u,
+  );
 });

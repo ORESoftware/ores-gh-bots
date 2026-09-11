@@ -18,7 +18,7 @@ A new commit produces a new SHA and therefore a new set of checks. Results for a
 - Event routing for opened, reopened, synchronized, edited, and ready-for-review pull requests.
 - Manual authorized `/ores-review` commands and check-run re-requests.
 - Distinct optional GitHub App identities for OpenAI, Claude, and the aggregate gate.
-- OpenAI Responses API structured output and Anthropic Messages API forced tool output.
+- OpenAI Responses API and Anthropic Messages API native structured outputs.
 - Explicit prompt-injection boundaries: repository content, issue text, commit messages, and diffs are always untrusted data.
 - Secret redaction before provider submission and before GitHub publication.
 - Bounded file/diff collection with binary-file and truncation accounting.
@@ -31,19 +31,24 @@ A new commit produces a new SHA and therefore a new set of checks. Results for a
 ## Fast start
 
 ```bash
-cp .env.example .env
-# Fill App/provider credentials; never commit .env.
+just init-env
+# Fill env/dec/review-bots.env, validate it, then encrypt it with SOPS.
 npm test
 npm start
 ```
 
 Expose `POST /webhooks/github` over HTTPS and configure the orchestrator GitHub App to send the subscribed events there.
 
+Every executable audits and resolves the repository-root `.cli-flags.toml` contract through the pinned `flags-2-env` runtime binding before performing effects. Credentials remain environment-only and are intentionally absent from the public flag contract.
+
+The default reviewer models are `gpt-5.6-sol` and `claude-sonnet-5`; both are configurable through environment variables. Provider output is schema-constrained and then validated again locally before it can affect a check run.
+
 ## Monorepo map
 
 - `apps/orchestrator`: webhook server, worker loop, and reconciler.
 - `apps/runner`: one-shot review execution for GitHub Actions or incident repair.
 - `apps/cli`: App manifest, fleet discovery, and ruleset commands.
+- `apps/reaper`: fail-closed, dependency-aware exact-SHA nightly merge planning and apply.
 - `packages/core`: policy, schemas, redaction, event routing, diff limits, and gate evaluation.
 - `packages/github`: App authentication and GitHub REST operations.
 - `packages/providers`: OpenAI and Anthropic adapters.
@@ -59,6 +64,10 @@ Expose `POST /webhooks/github` over HTTPS and configure the orchestrator GitHub 
 5. Push another commit and verify the old approvals no longer satisfy the PR.
 6. Change test rulesets to `active`, observe, then expand to production organizations.
 
-The older nightly reaper remains useful as a recovery path, but it should call this service or enqueue current-SHA reviews rather than act as the primary review trigger.
+The dependency-aware nightly reaper is implemented as a recovery path. It never replaces event-driven review: it requires the current-SHA ORES gate, independent green CI, explicit opt-in, resolved threads, clean mergeability, and reviewed dependency order before performing at most three sequential merges.
 
-See `docs/ROLLOUT.md`, `docs/APP_REGISTRATION.md`, and `docs/THREAT_MODEL.md` before activation.
+## Activation status
+
+The control plane is implemented but is **not fleet-active**. Source code, a GitHub repository, and green local tests do not establish any of the external gates: a deployed public HTTPS webhook, six registered App identities, provider/App credentials, App installations, `evaluate`-mode canary proof, or active repository rulesets. The service fails closed when those inputs are absent.
+
+See `docs/ACTIVATION_STATUS.md`, `docs/ROLLOUT.md`, `docs/APP_REGISTRATION.md`, `docs/MERGE_REAPER.md`, and `docs/THREAT_MODEL.md` before activation.

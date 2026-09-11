@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ORESoftware/ores-gh-bots/blob/main/config/merge-reaper.schema.json",
+  "title": "ORES dependency-aware merge reaper policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "minimumAgeHours",
+    "maxMerges",
+    "maxRepositories",
+    "maxPullRequestsPerRepository",
+    "mergeMethod",
+    "allowedBaseBranches",
+    "requireOptInLabel",
+    "optInLabels",
+    "denyLabels",
+    "requireHumanApproval",
+    "ignoredCiContexts",
+    "repositoryDependencies"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1
+    },
+    "minimumAgeHours": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 8760
+    },
+    "maxMerges": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3
+    },
+    "maxRepositories": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "maxPullRequestsPerRepository": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "mergeMethod": {
+      "enum": [
+        "merge",
+        "squash",
+        "rebase"
+      ]
+    },
+    "allowedBaseBranches": {
+      "$ref": "#/$defs/nonEmptyUniqueStrings"
+    },
+    "requireOptInLabel": {
+      "type": "boolean"
+    },
+    "optInLabels": {
+      "$ref": "#/$defs/nonEmptyUniqueStrings"
+    },
+    "denyLabels": {
+      "$ref": "#/$defs/nonEmptyUniqueStrings"
+    },
+    "requireHumanApproval": {
+      "type": "boolean"
+    },
+    "ignoredCiContexts": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "repositoryDependencies": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[^/]+/[^/]+$"
+      },
+      "additionalProperties": {
+        "type": "array",
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "pattern": "^[^/]+/[^/]+$"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyUniqueStrings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

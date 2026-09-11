@@ -1,0 +1,343 @@
+[parse]
+command_env = "ORES_GH_BOTS_COMMAND"
+positionals_env = "ORES_GH_BOTS_POSITIONALS"
+unknown_options_env = "ORES_GH_BOTS_UNKNOWN_OPTIONS"
+errors_env = "ORES_GH_BOTS_PARSE_ERRORS"
+allow_unknown = false
+
+[help]
+url = "https://github.com/ORESoftware/ores-gh-bots#readme"
+columns = ["options", "env", "type", "default", "description"]
+
+[flags.worker_only]
+env = "ORES_WORKER_ONLY"
+aliases = ["worker-only"]
+type = "bool"
+default = false
+help = "Run the durable review workers without the webhook HTTP listener."
+
+[flags.port]
+env = "PORT"
+aliases = ["port"]
+short = "p"
+type = "integer"
+default = 8080
+help = "Webhook HTTP listener port."
+
+[flags.body_limit_bytes]
+env = "BODY_LIMIT_BYTES"
+aliases = ["body-limit-bytes"]
+type = "integer"
+default = 2000000
+help = "Maximum GitHub webhook request body size in bytes."
+
+[flags.headers_timeout_ms]
+env = "HTTP_HEADERS_TIMEOUT_MS"
+aliases = ["headers-timeout-ms"]
+type = "integer"
+default = 10000
+help = "Maximum time to receive complete HTTP headers."
+
+[flags.request_timeout_ms]
+env = "HTTP_REQUEST_TIMEOUT_MS"
+aliases = ["request-timeout-ms"]
+type = "integer"
+default = 30000
+help = "Maximum time to receive a complete HTTP request."
+
+[flags.keep_alive_timeout_ms]
+env = "HTTP_KEEP_ALIVE_TIMEOUT_MS"
+aliases = ["keep-alive-timeout-ms"]
+type = "integer"
+default = 5000
+help = "Idle keep-alive timeout for webhook connections."
+
+[flags.max_header_bytes]
+env = "HTTP_MAX_HEADER_BYTES"
+aliases = ["max-header-bytes"]
+type = "integer"
+default = 16384
+help = "Maximum aggregate HTTP request-header bytes."
+
+[flags.max_headers_count]
+env = "HTTP_MAX_HEADERS_COUNT"
+aliases = ["max-headers-count"]
+type = "integer"
+default = 64
+help = "Maximum number of parsed HTTP request headers."
+
+[flags.max_requests_per_socket]
+env = "HTTP_MAX_REQUESTS_PER_SOCKET"
+aliases = ["max-requests-per-socket"]
+type = "integer"
+default = 100
+help = "Maximum requests accepted on one keep-alive socket."
+
+[commands.review]
+help = "Run one exact-SHA pull-request review or gate repair."
+
+[commands.review.flags.owner]
+env = "REVIEW_OWNER"
+aliases = ["owner"]
+type = "string"
+help = "GitHub organization or repository owner."
+
+[commands.review.flags.repo]
+env = "REVIEW_REPO"
+aliases = ["repo"]
+type = "string"
+help = "GitHub repository name without its owner."
+
+[commands.review.flags.pr_number]
+env = "REVIEW_PR_NUMBER"
+aliases = ["pr-number"]
+type = "integer"
+help = "Positive pull-request number."
+
+[commands.review.flags.head_sha]
+env = "REVIEW_HEAD_SHA"
+aliases = ["head-sha"]
+type = "string"
+help = "Exact 40- or 64-character pull-request head SHA."
+
+[commands.review.flags.installation_id]
+env = "REVIEW_INSTALLATION_ID"
+aliases = ["installation-id"]
+type = "integer"
+help = "Optional orchestrator GitHub App installation hint; verified before use."
+
+[commands.review.flags.reason]
+env = "REVIEW_REASON"
+aliases = ["reason"]
+type = "string"
+default = "one-shot-runner"
+help = "Bounded non-secret reason recorded for the review job."
+
+[commands.review.flags.type]
+env = "REVIEW_TYPE"
+aliases = ["type"]
+type = "string"
+default = "review"
+help = "Job type: review or gate."
+
+[commands.manifest]
+help = "Inspect checked-in GitHub App manifests."
+
+[commands.manifest.commands.print]
+help = "Print one checked-in GitHub App manifest; ROLE is positional."
+
+[commands.fleet]
+help = "Discover repositories visible to the orchestrator GitHub App."
+
+[commands.fleet.commands.discover]
+help = "Discover the installed repository fleet."
+
+[commands.fleet.commands.discover.flags.limit]
+env = "ORES_CLI_LIMIT"
+aliases = ["limit"]
+type = "integer"
+help = "Maximum number of repositories to return."
+
+[commands.rulesets]
+help = "Plan or apply the dual-review repository ruleset."
+
+[commands.rulesets.commands.plan]
+help = "Render repository ruleset changes without writing them."
+
+[commands.rulesets.commands.plan.flags.repository]
+env = "ORES_CLI_REPOSITORY"
+aliases = ["repository"]
+type = "string"
+help = "Limit the operation to one OWNER/REPO."
+
+[commands.rulesets.commands.plan.flags.enforcement]
+env = "ORES_CLI_ENFORCEMENT"
+aliases = ["enforcement"]
+type = "string"
+default = "evaluate"
+help = "Ruleset enforcement: disabled, evaluate, or active."
+
+[commands.rulesets.commands.plan.flags.branch_mode]
+env = "ORES_CLI_BRANCH_MODE"
+aliases = ["branch-mode"]
+type = "string"
+default = "all"
+help = "Branch scope: all or protected. All branches are the fleet default; protected is an explicit opt-down."
+
+[commands.rulesets.commands.plan.flags.limit]
+env = "ORES_CLI_LIMIT"
+aliases = ["limit"]
+type = "integer"
+help = "Maximum number of repositories to inspect."
+
+[commands.rulesets.commands.apply]
+help = "Create or update repository rulesets."
+
+[commands.rulesets.commands.apply.flags.repository]
+env = "ORES_CLI_REPOSITORY"
+aliases = ["repository"]
+type = "string"
+help = "Limit the operation to one OWNER/REPO."
+
+[commands.rulesets.commands.apply.flags.enforcement]
+env = "ORES_CLI_ENFORCEMENT"
+aliases = ["enforcement"]
+type = "string"
+default = "evaluate"
+help = "Ruleset enforcement: disabled, evaluate, or active."
+
+[commands.rulesets.commands.apply.flags.branch_mode]
+env = "ORES_CLI_BRANCH_MODE"
+aliases = ["branch-mode"]
+type = "string"
+default = "all"
+help = "Branch scope: all or protected. All branches are the fleet default; protected is an explicit opt-down."
+
+[commands.rulesets.commands.apply.flags.limit]
+env = "ORES_CLI_LIMIT"
+aliases = ["limit"]
+type = "integer"
+help = "Maximum number of repositories to update."
+
+[commands.rulesets.commands.apply.flags.confirm]
+env = "ORES_CLI_CONFIRM"
+aliases = ["confirm"]
+type = "string"
+help = "Required ACTIVATE-ticket acknowledgement for active enforcement."
+
+[commands.rulesets.commands.apply.flags.continue]
+env = "ORES_CLI_CONTINUE"
+aliases = ["continue"]
+type = "bool"
+default = false
+help = "Continue after an individual repository update failure."
+
+[commands.form]
+help = "Create a private GitHub App manifest registration form."
+
+[commands.form.flags.role]
+env = "ORES_APP_ROLE"
+aliases = ["role"]
+type = "string"
+help = "App role from github-apps/policy.json."
+
+[commands.form.flags.owner]
+env = "ORES_APP_OWNER"
+aliases = ["owner"]
+type = "string"
+help = "GitHub user or organization that will own the App."
+
+[commands.form.flags.owner_type]
+env = "ORES_APP_OWNER_TYPE"
+aliases = ["owner-type"]
+type = "string"
+default = "user"
+help = "GitHub App owner account type: user or organization."
+
+[commands.form.flags.base_url]
+env = "ORES_APP_BASE_URL"
+aliases = ["base-url"]
+type = "string"
+help = "Deployed HTTPS base URL for webhook and manifest callback routes."
+
+[commands.form.flags.output]
+env = "ORES_APP_OUTPUT"
+aliases = ["output"]
+type = "string"
+help = "Mode-0600 registration form output path."
+
+[commands.form.flags.state_file]
+env = "ORES_APP_STATE_FILE"
+aliases = ["state-file"]
+type = "string"
+help = "Mode-0600 private callback-state record path."
+
+[commands.convert]
+help = "Convert a verified GitHub manifest callback into a private dotenv fragment."
+
+[commands.convert.flags.role]
+env = "ORES_APP_ROLE"
+aliases = ["role"]
+type = "string"
+help = "App role from github-apps/policy.json."
+
+[commands.convert.flags.state_file]
+env = "ORES_APP_STATE_FILE"
+aliases = ["state-file"]
+type = "string"
+help = "Mode-0600 private callback-state record path."
+
+[commands.convert.flags.code_file]
+env = "ORES_APP_CODE_FILE"
+aliases = ["code-file"]
+type = "string"
+help = "Mode-0600 file containing the one-time manifest conversion code."
+
+[commands.convert.flags.callback_state_file]
+env = "ORES_APP_CALLBACK_STATE_FILE"
+aliases = ["callback-state-file"]
+type = "string"
+help = "Mode-0600 file containing the returned callback state."
+
+[commands.convert.flags.output]
+env = "ORES_APP_OUTPUT"
+aliases = ["output"]
+type = "string"
+help = "Mode-0600 dotenv fragment output path."
+
+[commands.reaper]
+help = "Plan or apply the fail-closed dependency-aware pull-request merge reaper."
+
+[commands.reaper.flags.policy]
+env = "MERGE_REAPER_POLICY"
+aliases = ["policy"]
+type = "string"
+default = "config/merge-reaper.example.json"
+help = "Reviewed dependency and merge policy JSON path."
+
+[commands.reaper.flags.minimum_age_hours]
+env = "MERGE_REAPER_MIN_AGE_HOURS"
+aliases = ["minimum-age-hours"]
+type = "integer"
+default = 55
+help = "Minimum pull-request age before consideration."
+
+[commands.reaper.flags.max_merges]
+env = "MERGE_REAPER_MAX_MERGES"
+aliases = ["max-merges"]
+type = "integer"
+default = 3
+help = "Maximum merge effects in one run; hard-capped at three."
+
+[commands.reaper.flags.max_repositories]
+env = "MERGE_REAPER_MAX_REPOSITORIES"
+aliases = ["max-repositories"]
+type = "integer"
+default = 2000
+help = "Maximum installed repositories to inspect."
+
+[commands.reaper.flags.max_prs_per_repository]
+env = "MERGE_REAPER_MAX_PRS_PER_REPOSITORY"
+aliases = ["max-prs-per-repository"]
+type = "integer"
+default = 100
+help = "Maximum open pull requests inspected per repository."
+
+[commands.reaper.flags.output]
+env = "MERGE_REAPER_OUTPUT"
+aliases = ["output"]
+type = "string"
+default = "merge-reaper-report.json"
+help = "Machine-readable report path."
+
+[commands.reaper.flags.confirm]
+env = "MERGE_REAPER_CONFIRM"
+aliases = ["confirm"]
+type = "string"
+help = "Required MERGE-ticket acknowledgement for apply mode."
+
+[commands.reaper.commands.plan]
+help = "Inspect the installed fleet and render an exact-head merge plan without writes."
+
+[commands.reaper.commands.apply]
+help = "Merge at most three exact-head eligible pull requests in dependency order."

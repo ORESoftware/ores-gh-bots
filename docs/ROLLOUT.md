@@ -4,6 +4,7 @@
 
 - Install Apps only in organizations whose names end in `-test`.
 - Deploy the canary overlay with one replica and persistent SQLite storage.
+- Confirm the rendered canary resources use `app.kubernetes.io/instance: canary`; production must use the disjoint `production` selector so the two Deployment controllers and Services never overlap.
 - Run `node apps/cli/src/main.mjs fleet discover` and inspect the generated inventory.
 - Run `node apps/cli/src/main.mjs rulesets apply --enforcement evaluate --branch-mode all`.
 - Open a PR against a non-default branch and against the default branch.

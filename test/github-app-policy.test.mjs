@@ -26,6 +26,16 @@ test('webhook subscription drift is rejected', () => {
   assert.match(validatePolicyDocuments(documents).join('\n'), /orchestrator: event drift/u);
 });
 
+test('every manifest keeps an HTTPS conversion callback without adding reviewer webhooks', () => {
+  const missingRedirect = structuredClone(baseline);
+  delete missingRedirect.manifests.openai.redirect_url;
+  assert.match(validatePolicyDocuments(missingRedirect).join('\n'), /openai: manifest redirect URL must be valid/u);
+
+  const reviewerWebhook = structuredClone(baseline);
+  reviewerWebhook.manifests.openai.hook_attributes = { active: true, url: 'https://example.test/webhook' };
+  assert.match(validatePolicyDocuments(reviewerWebhook).join('\n'), /openai: non-webhook App must not configure a webhook/u);
+});
+
 test('review identities must remain public-unlisted for fleet installation', () => {
   const documents = structuredClone(baseline);
   documents.manifests.claude.public = false;
@@ -42,4 +52,23 @@ test('dotenv parser preserves PEM escape sequences and reports duplicate keys', 
   const parsed = parseDotenv('A=one\nPEM=first\\nsecond\nA=two\n');
   assert.equal(parsed.values.PEM, 'first\\nsecond');
   assert.deepEqual(parsed.duplicates, ['A']);
+});
+
+
+test('merge reaper remains a separate least-privilege no-webhook identity', () => {
+  const reaper = baseline.manifests.reaper;
+  assert.equal(reaper.public, true);
+  assert.deepEqual(reaper.default_events, []);
+  assert.deepEqual(reaper.default_permissions, {
+    checks: 'read',
+    contents: 'write',
+    metadata: 'read',
+    pull_requests: 'write',
+    statuses: 'read',
+  });
+  assert.equal(baseline.policy.apps.reaper.installationScope, 'fleet');
+  assert.deepEqual(baseline.policy.apps.reaper.secretEnv, [
+    'MERGE_REAPER_APP_ID',
+    'MERGE_REAPER_APP_PRIVATE_KEY',
+  ]);
 });

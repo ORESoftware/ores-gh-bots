@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadConfig, validateControlPlaneConfig, validateRuntimeConfig } from '../packages/core/src/index.mjs';
 import { loadPolicyDocuments, parseDotenv } from './lib/github-app-policy.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -37,6 +38,14 @@ for (const key of privateKeyKeys) {
 }
 
 if (String(values.GITHUB_WEBHOOK_SECRET ?? '').length < 20) errors.push('GITHUB_WEBHOOK_SECRET must be at least 20 characters');
+
+try {
+  const config = loadConfig(values);
+  validateRuntimeConfig(config, { webhook: true, providers: true });
+  validateControlPlaneConfig(config, { webhook: true });
+} catch (error) {
+  errors.push(`runtime configuration is invalid: ${error.message}`);
+}
 
 if (errors.length > 0) {
   console.error(`secret validation failed for ${target}:\n- ${errors.join('\n- ')}`);

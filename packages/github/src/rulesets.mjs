@@ -2,6 +2,20 @@ import { CHECK_NAMES } from '../../core/src/constants.mjs';
 
 export const RULESET_NAME = 'ORES dual-AI pull-request gate';
 
+function requiredReviewAppIds(appIds) {
+  const entries = ['openai', 'claude', 'gate'].map((role) => {
+    const id = Number(appIds?.[role]);
+    if (!Number.isSafeInteger(id) || id < 1) {
+      throw new Error(`Ruleset requires a positive ${role} GitHub App ID`);
+    }
+    return [role, id];
+  });
+  if (new Set(entries.map(([, id]) => id)).size !== entries.length) {
+    throw new Error('Ruleset reviewer and gate GitHub App IDs must be distinct');
+  }
+  return Object.fromEntries(entries);
+}
+
 export function buildRulesetPayload({
   enforcement = 'evaluate',
   branchMode = 'all',
@@ -11,14 +25,15 @@ export function buildRulesetPayload({
 }) {
   if (!['disabled', 'evaluate', 'active'].includes(enforcement)) throw new Error(`Invalid enforcement: ${enforcement}`);
   if (!['all', 'protected'].includes(branchMode)) throw new Error(`Invalid branch mode: ${branchMode}`);
+  const pinnedAppIds = requiredReviewAppIds(appIds);
   const include = branchMode === 'all' ? ['refs/heads/**'] : protectedBranchPatterns;
   const required = [
-    [CHECK_NAMES.openai, appIds.openai],
-    [CHECK_NAMES.claude, appIds.claude],
-    [CHECK_NAMES.gate, appIds.gate],
+    [CHECK_NAMES.openai, pinnedAppIds.openai],
+    [CHECK_NAMES.claude, pinnedAppIds.claude],
+    [CHECK_NAMES.gate, pinnedAppIds.gate],
   ].map(([context, integrationId]) => ({
     context,
-    ...(integrationId ? { integration_id: Number(integrationId) } : {}),
+    integration_id: integrationId,
   }));
 
   return {

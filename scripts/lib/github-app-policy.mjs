@@ -141,6 +141,12 @@ export function validatePolicyDocuments({
     if (!sameJson(sortedStrings(manifest.default_events ?? []), sortedStrings(expected.events ?? []))) {
       errors.push(`${role}: event drift; expected ${JSON.stringify(sortedStrings(expected.events ?? []))}, got ${JSON.stringify(sortedStrings(manifest.default_events ?? []))}`);
     }
+    try {
+      const redirectUrl = new URL(manifest.redirect_url ?? '');
+      if (redirectUrl.protocol !== 'https:') errors.push(`${role}: manifest redirect URL must use HTTPS`);
+    } catch {
+      errors.push(`${role}: manifest redirect URL must be valid`);
+    }
     if (role === 'orchestrator') {
       if (manifest.hook_attributes?.active !== true) errors.push('orchestrator: webhook must be active');
       try {
@@ -149,14 +155,8 @@ export function validatePolicyDocuments({
       } catch {
         errors.push('orchestrator: webhook URL must be valid');
       }
-      try {
-        const redirectUrl = new URL(manifest.redirect_url ?? '');
-        if (redirectUrl.protocol !== 'https:') errors.push('orchestrator: redirect URL must use HTTPS');
-      } catch {
-        errors.push('orchestrator: redirect URL must be valid');
-      }
-    } else if (manifest.hook_attributes || manifest.redirect_url) {
-      errors.push(`${role}: non-webhook App must not configure hook or redirect URLs`);
+    } else if (manifest.hook_attributes) {
+      errors.push(`${role}: non-webhook App must not configure a webhook`);
     }
 
     for (const key of expected.secretEnv ?? []) {

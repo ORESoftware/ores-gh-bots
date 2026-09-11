@@ -1,6 +1,7 @@
 {
   "name": "ORES Review Actions Dispatcher",
   "url": "https://github.com/ORESoftware/ores-gh-bots",
+  "redirect_url": "https://replace.example/github/app-manifest/callback",
   "public": false,
   "default_permissions": {
     "actions": "write",

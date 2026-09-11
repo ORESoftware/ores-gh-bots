@@ -1,5 +1,6 @@
 import { CHECK_NAMES, ownerIsAllowed, redactText } from '../../../packages/core/src/index.mjs';
 import {
+  checkExternalId,
   findLatestCheckRun,
   listAppInstallations,
   listInstallationRepositories,
@@ -20,8 +21,16 @@ export class Reconciler {
   async runOnce() {
     if (this.running || !this.config.reconciliation.enabled) return { skipped: true };
     this.running = true;
-    const totals = { installations: 0, repositories: 0, pullRequests: 0, jobs: 0, errors: 0 };
+    const totals = {
+      installations: 0,
+      repositories: 0,
+      pullRequests: 0,
+      jobs: 0,
+      errors: 0,
+      pruned: { deliveries: 0, jobs: 0, reviews: 0 },
+    };
     try {
+      totals.pruned = this.queue.prune();
       const installations = await listAppInstallations(this.client, this.auth.appJwt('orchestrator'));
       for (const installation of installations) {
         if (totals.repositories >= this.config.reconciliation.maxRepos) break;
@@ -35,30 +44,44 @@ export class Reconciler {
             if (!ownerIsAllowed(this.config, repository.owner?.login) || repository.archived || repository.disabled) continue;
             totals.repositories += 1;
             try {
+              const owner = repository.owner.login;
+              const repo = repository.name;
               const prs = await listOpenPullRequests(
                 this.client,
                 token,
-                repository.owner.login,
-                repository.name,
+                owner,
+                repo,
                 this.config.reconciliation.maxPrsPerRepo,
               );
               for (const pr of prs) {
                 if (pr.draft) continue;
                 totals.pullRequests += 1;
+                const identity = {
+                  owner,
+                  repo,
+                  prNumber: pr.number,
+                  headSha: pr.head.sha,
+                };
                 const [openai, claude, gate] = await Promise.all([
-                  findLatestCheckRun(this.client, token, repository.owner.login, repository.name, pr.head.sha, CHECK_NAMES.openai),
-                  findLatestCheckRun(this.client, token, repository.owner.login, repository.name, pr.head.sha, CHECK_NAMES.claude),
-                  findLatestCheckRun(this.client, token, repository.owner.login, repository.name, pr.head.sha, CHECK_NAMES.gate),
+                  findLatestCheckRun(this.client, token, owner, repo, pr.head.sha, CHECK_NAMES.openai, {
+                    externalId: checkExternalId('openai', owner, repo, pr.number, pr.head.sha),
+                    appId: this.config.apps.openai.id,
+                  }),
+                  findLatestCheckRun(this.client, token, owner, repo, pr.head.sha, CHECK_NAMES.claude, {
+                    externalId: checkExternalId('claude', owner, repo, pr.number, pr.head.sha),
+                    appId: this.config.apps.claude.id,
+                  }),
+                  findLatestCheckRun(this.client, token, owner, repo, pr.head.sha, CHECK_NAMES.gate, {
+                    externalId: checkExternalId('gate', owner, repo, pr.number, pr.head.sha),
+                    appId: this.config.apps.gate.id,
+                  }),
                 ]);
                 const type = !openai || !claude ? 'review' : !gate ? 'gate' : null;
                 if (!type) continue;
                 const result = this.queue.enqueue({
                   type,
                   installationId: installation.id,
-                  owner: repository.owner.login,
-                  repo: repository.name,
-                  prNumber: pr.number,
-                  headSha: pr.head.sha,
+                  ...identity,
                   reason: `reconciler:missing-${type}-check`,
                   force: true,
                 });
