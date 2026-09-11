@@ -32,9 +32,11 @@ function auditContract(configPath) {
 }
 
 /**
- * Resolve argv and .env before any executable performs effects. Schema defaults
- * are lowest precedence, followed by ordinary .env, process env, .env entries
- * explicitly declared to override process env, and finally argv overrides.
+ * Resolve argv before any executable performs effects. The repository-root
+ * contract disables implicit dotenv loading; schema defaults are lowest
+ * precedence, followed by explicit process environment and finally argv.
+ * The generic merge below still preserves flags-2-env semantics for a reviewed
+ * alternate configPath that deliberately enables another source.
  */
 export function resolveCli(argv = process.argv, { env = process.env, configPath = CLI_FLAGS_PATH } = {}) {
   auditContract(configPath);

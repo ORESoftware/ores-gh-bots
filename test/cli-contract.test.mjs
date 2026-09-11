@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { auditConfig } from '@oresoftware/f2e';
 import { CLI_FLAGS_PATH, resolveCli } from '../packages/core/src/cli.mjs';
 
@@ -36,6 +39,32 @@ test('flags-2-env resolves typed server and exact-review inputs', () => {
   assert.equal(review.values.REVIEW_PR_NUMBER, 9);
   assert.equal(review.values.REVIEW_REASON, 'one-shot-runner');
   assert.equal(review.values.REVIEW_TYPE, 'review');
+});
+
+test('canonical CLI contract ignores working-directory dotenv while retaining env and argv precedence', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'ores-gh-bots-no-dotenv-'));
+  try {
+    await writeFile(join(cwd, '.env'), 'PORT=6553\nORES_WORKER_ONLY=true\n', 'utf8');
+    const moduleUrl = new URL('../packages/core/src/cli.mjs', import.meta.url).href;
+    const script = `
+      import { resolveCli } from ${JSON.stringify(moduleUrl)};
+      const resolved = resolveCli(['node', 'orchestrator', '--port', '9191']);
+      process.stdout.write(JSON.stringify({
+        port: resolved.values.PORT,
+        workerOnly: resolved.values.ORES_WORKER_ONLY,
+      }));
+    `;
+    const childEnv = { ...process.env, PORT: '9091' };
+    delete childEnv.ORES_WORKER_ONLY;
+    const output = execFileSync(process.execPath, ['--input-type=module', '--eval', script], {
+      cwd,
+      env: childEnv,
+      encoding: 'utf8',
+    });
+    assert.deepEqual(JSON.parse(output), { port: 9191, workerOnly: false });
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
 });
 
 test('ruleset commands default to evaluate-mode all branches', () => {
@@ -79,6 +108,7 @@ test('flags-2-env rejects unknown, duplicate, and invalid typed options without 
 test('credentials are environment-only and executable boundaries use the canonical parser', async () => {
   const contract = await readFile(CLI_FLAGS_PATH, 'utf8');
   assert.doesNotMatch(contract, /API_KEY|PRIVATE_KEY|WEBHOOK_SECRET|ADMIN_TOKEN/u);
+  assert.match(contract, /\[env\][\s\S]*?load = false[\s\S]*?files = \[\]/u);
   for (const path of [
     '../apps/orchestrator/src/main.mjs',
     '../apps/runner/src/main.mjs',
