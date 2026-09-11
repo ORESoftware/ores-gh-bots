@@ -12,7 +12,11 @@ function optionalString(value) {
 
 function integer(value, fallback, { min = Number.MIN_SAFE_INTEGER, max = Number.MAX_SAFE_INTEGER } = {}) {
   if (value === undefined || value === null || value === '') return fallback;
-  const parsed = Number.parseInt(String(value), 10);
+  const text = String(value).trim();
+  if (!/^[+-]?\d+$/u.test(text)) {
+    throw new Error('Invalid integer configuration value');
+  }
+  const parsed = Number(text);
   if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
     throw new Error('Invalid integer configuration value');
   }
@@ -114,12 +118,23 @@ export function loadConfig(env = process.env) {
     catch { throw new Error(`OWNER_PATTERNS entry ${index + 1} is invalid`); }
   });
 
+  const server = {
+    port: integer(env.PORT, DEFAULTS.port, { min: 1, max: 65_535 }),
+    webhookPath: optionalString(env.GITHUB_WEBHOOK_PATH) ?? '/webhooks/github',
+    bodyLimitBytes: integer(env.BODY_LIMIT_BYTES, DEFAULTS.bodyLimitBytes, { min: 1_024, max: 16_777_216 }),
+    headersTimeoutMs: integer(env.HTTP_HEADERS_TIMEOUT_MS, DEFAULTS.headersTimeoutMs, { min: 1_000, max: 120_000 }),
+    requestTimeoutMs: integer(env.HTTP_REQUEST_TIMEOUT_MS, DEFAULTS.requestTimeoutMs, { min: 1_000, max: 300_000 }),
+    keepAliveTimeoutMs: integer(env.HTTP_KEEP_ALIVE_TIMEOUT_MS, DEFAULTS.keepAliveTimeoutMs, { min: 1_000, max: 60_000 }),
+    maxHeaderBytes: integer(env.HTTP_MAX_HEADER_BYTES, DEFAULTS.maxHeaderBytes, { min: 8_192, max: 65_536 }),
+    maxHeadersCount: integer(env.HTTP_MAX_HEADERS_COUNT, DEFAULTS.maxHeadersCount, { min: 16, max: 256 }),
+    maxRequestsPerSocket: integer(env.HTTP_MAX_REQUESTS_PER_SOCKET, DEFAULTS.maxRequestsPerSocket, { min: 1, max: 10_000 }),
+  };
+  if (server.headersTimeoutMs > server.requestTimeoutMs) {
+    throw new Error('HTTP_HEADERS_TIMEOUT_MS must not exceed HTTP_REQUEST_TIMEOUT_MS');
+  }
+
   return {
-    server: {
-      port: integer(env.PORT, DEFAULTS.port, { min: 1, max: 65535 }),
-      webhookPath: optionalString(env.GITHUB_WEBHOOK_PATH) ?? '/webhooks/github',
-      bodyLimitBytes: integer(env.BODY_LIMIT_BYTES, DEFAULTS.bodyLimitBytes, { min: 1_024 }),
-    },
+    server,
     github: {
       apiBaseUrl: optionalString(env.GITHUB_API_BASE_URL) ?? DEFAULTS.githubApiBaseUrl,
       apiVersion: optionalString(env.GITHUB_API_VERSION) ?? DEFAULTS.githubApiVersion,
@@ -134,6 +149,7 @@ export function loadConfig(env = process.env) {
       claude: appCredentials(env, 'CLAUDE_REVIEW', reviewerFallback),
       gate: appCredentials(env, 'GATE', reviewerFallback),
       actions: appCredentials(env, 'ACTIONS'),
+      reaper: appCredentials(env, 'MERGE_REAPER'),
     },
     security: {
       allowSharedAppIdentity,
@@ -210,6 +226,11 @@ export function validateRuntimeConfig(config, { webhook = true, providers = true
     if (!config.apps.actions.id) missing.push('ACTIONS_APP_ID');
     if (!config.apps.actions.privateKey) missing.push('ACTIONS_APP_PRIVATE_KEY');
   }
+  const reaperConfigured = Boolean(config.apps.reaper.id || config.apps.reaper.privateKey);
+  if (reaperConfigured) {
+    if (!config.apps.reaper.id) missing.push('MERGE_REAPER_APP_ID');
+    if (!config.apps.reaper.privateKey) missing.push('MERGE_REAPER_APP_PRIVATE_KEY');
+  }
   if (missing.length) throw new Error(`Missing required configuration: ${missing.join(', ')}`);
 
   if (providers) {
@@ -224,6 +245,8 @@ export function validateRuntimeConfig(config, { webhook = true, providers = true
       ['openai', config.apps.openai.id],
       ['claude', config.apps.claude.id],
       ['gate', config.apps.gate.id],
+      ...(config.apps.actions.id ? [['actions', config.apps.actions.id]] : []),
+      ...(config.apps.reaper.id ? [['reaper', config.apps.reaper.id]] : []),
     ];
     const seen = new Map();
     for (const [role, id] of identities) {

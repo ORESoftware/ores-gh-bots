@@ -145,6 +145,10 @@ const credentialMap = {
     id: 'ACTIONS_APP_ID',
     pem: 'ACTIONS_APP_PRIVATE_KEY',
   },
+  reaper: {
+    id: 'MERGE_REAPER_APP_ID',
+    pem: 'MERGE_REAPER_APP_PRIVATE_KEY',
+  },
 };
 
 function dotenvValue(value) {

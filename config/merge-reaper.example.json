@@ -1,0 +1,75 @@
+{
+  "$schema": "./merge-reaper.schema.json",
+  "version": 1,
+  "minimumAgeHours": 55,
+  "maxMerges": 3,
+  "maxRepositories": 2000,
+  "maxPullRequestsPerRepository": 100,
+  "mergeMethod": "squash",
+  "allowedBaseBranches": [
+    "main",
+    "master",
+    "dev",
+    "develop"
+  ],
+  "requireOptInLabel": true,
+  "optInLabels": [
+    "automerge",
+    "merge-when-ready",
+    "ores-automerge"
+  ],
+  "denyLabels": [
+    "blocked",
+    "do-not-merge",
+    "hold",
+    "legal-review",
+    "manual-merge",
+    "needs-security-review",
+    "no-automerge",
+    "security-review"
+  ],
+  "requireHumanApproval": false,
+  "ignoredCiContexts": [],
+  "repositoryDependencies": {
+    "opto-sync/opto-sync-monorepo": [
+      "opto-sync/opto-sync-interfaces",
+      "opto-sync/opto-sync-lib",
+      "opto-sync/opto-sync-clients"
+    ],
+    "fiducia-cloud/fiducia-monorepo": [
+      "fiducia-cloud/fiducia-interfaces",
+      "fiducia-cloud/fiducia-lib",
+      "fiducia-cloud/fiducia-clients"
+    ],
+    "3fa-app/3fa-monorepo": [
+      "3fa-app/3fa-interfaces",
+      "3fa-app/3fa-clients"
+    ],
+    "elenkos-systems/elenkos-monorepo": [
+      "elenkos-systems/elenkos-interfaces",
+      "elenkos-systems/elenkos-clients"
+    ],
+    "fanwaave/fanwaave-monorepo": [
+      "fanwaave/fanwaave-interfaces",
+      "fanwaave/fanwaave-clients"
+    ],
+    "quaestor-ledger/quaestor-monorepo": [
+      "quaestor-ledger/quaestor-interfaces",
+      "quaestor-ledger/quaestor-clients"
+    ],
+    "ores-otel/ores-otel-monorepo": [
+      "ores-otel/ores-otel-clients"
+    ],
+    "shared-auth/shared-auth-monorepo": [
+      "shared-auth/shared-auth-interfaces",
+      "shared-auth/shared-auth-lib",
+      "shared-auth/shared-auth-clients"
+    ],
+    "zed-pkg/zed-monorepo": [
+      "zed-pkg/zed-interfaces",
+      "zed-pkg/zed-lib",
+      "zed-pkg/zed-clients",
+      "zed-pkg/zed-cli"
+    ]
+  }
+}

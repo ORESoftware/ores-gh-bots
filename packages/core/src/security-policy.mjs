@@ -16,12 +16,13 @@ export function validateControlPlaneConfig(config, { webhook = true } = {}) {
     else identities.push([role, id]);
   }
 
-  const actionsConfigured = Boolean(config.apps?.actions?.id || config.apps?.actions?.privateKey);
-  if (actionsConfigured) {
-    const id = positiveInteger(config.apps.actions.id);
-    if (id === null) errors.push('actions GitHub App ID must be a positive integer');
-    else identities.push(['actions', id]);
-    if (!config.apps.actions.privateKey) errors.push('actions GitHub App private key is required when its ID is configured');
+  for (const [role, label] of [['actions', 'actions'], ['reaper', 'merge reaper']]) {
+    const configured = Boolean(config.apps?.[role]?.id || config.apps?.[role]?.privateKey);
+    if (!configured) continue;
+    const id = positiveInteger(config.apps[role].id);
+    if (id === null) errors.push(`${label} GitHub App ID must be a positive integer`);
+    else identities.push([role, id]);
+    if (!config.apps[role].privateKey) errors.push(`${label} GitHub App private key is required when its ID is configured`);
   }
 
   if (!config.security?.allowSharedAppIdentity) {

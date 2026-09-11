@@ -38,7 +38,8 @@
         "openai",
         "claude",
         "gate",
-        "actions"
+        "actions",
+        "reaper"
       ],
       "properties": {
         "orchestrator": {
@@ -54,6 +55,9 @@
           "$ref": "#/$defs/app"
         },
         "actions": {
+          "$ref": "#/$defs/app"
+        },
+        "reaper": {
           "$ref": "#/$defs/app"
         }
       }

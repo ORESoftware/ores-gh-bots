@@ -53,3 +53,22 @@ test('dotenv parser preserves PEM escape sequences and reports duplicate keys', 
   assert.equal(parsed.values.PEM, 'first\\nsecond');
   assert.deepEqual(parsed.duplicates, ['A']);
 });
+
+
+test('merge reaper remains a separate least-privilege no-webhook identity', () => {
+  const reaper = baseline.manifests.reaper;
+  assert.equal(reaper.public, true);
+  assert.deepEqual(reaper.default_events, []);
+  assert.deepEqual(reaper.default_permissions, {
+    checks: 'read',
+    contents: 'write',
+    metadata: 'read',
+    pull_requests: 'write',
+    statuses: 'read',
+  });
+  assert.equal(baseline.policy.apps.reaper.installationScope, 'fleet');
+  assert.deepEqual(baseline.policy.apps.reaper.secretEnv, [
+    'MERGE_REAPER_APP_ID',
+    'MERGE_REAPER_APP_PRIVATE_KEY',
+  ]);
+});
