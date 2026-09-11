@@ -30,20 +30,26 @@ function csv(value) {
     .filter(Boolean);
 }
 
-function requiredCiAppIds(value) {
-  const result = {};
-  for (const item of csv(value)) {
-    const separator = item.lastIndexOf('=');
-    if (separator <= 0 || separator === item.length - 1) {
-      throw new Error(`Invalid REQUIRED_CI_APP_IDS entry: ${item}`);
-    }
-    const context = item.slice(0, separator).trim();
-    const appId = integer(item.slice(separator + 1), null, { min: 1 });
-    if (!context || appId === null) throw new Error(`Invalid REQUIRED_CI_APP_IDS entry: ${item}`);
-    if (Object.hasOwn(result, context)) throw new Error(`Duplicate REQUIRED_CI_APP_IDS context: ${context}`);
-    result[context] = appId;
+function requiredCiAppIdEntry(item) {
+  const separator = item.lastIndexOf('=');
+  if (separator <= 0 || separator === item.length - 1) {
+    throw new Error(`Invalid REQUIRED_CI_APP_IDS entry: ${item}`);
   }
-  return result;
+  const context = item.slice(0, separator).trim();
+  const appId = integer(item.slice(separator + 1), null, { min: 1 });
+  if (!context || appId === null) throw new Error(`Invalid REQUIRED_CI_APP_IDS entry: ${item}`);
+  return [context, appId];
+}
+
+function requiredCiAppIds(value) {
+  const entries = csv(value).map(requiredCiAppIdEntry);
+  const duplicate = entries.find(
+    ([context], index) => entries.findIndex(([candidate]) => candidate === context) !== index,
+  );
+  if (duplicate) {
+    throw new Error(`Duplicate REQUIRED_CI_APP_IDS context: ${duplicate[0]}`);
+  }
+  return Object.fromEntries(entries);
 }
 
 function normalizePrivateKey(value) {
@@ -150,48 +156,68 @@ export function loadConfig(env = process.env) {
   };
 }
 
-export function validateRuntimeConfig(config, { webhook = true, providers = true } = {}) {
-  const missing = [];
-  if (!config.apps.orchestrator.id) missing.push('GITHUB_APP_ID');
-  if (!config.apps.orchestrator.privateKey) missing.push('GITHUB_APP_PRIVATE_KEY');
-  if (!config.apps.openai.id) missing.push('OPENAI_REVIEW_APP_ID');
-  if (!config.apps.openai.privateKey) missing.push('OPENAI_REVIEW_APP_PRIVATE_KEY');
-  if (!config.apps.claude.id) missing.push('CLAUDE_REVIEW_APP_ID');
-  if (!config.apps.claude.privateKey) missing.push('CLAUDE_REVIEW_APP_PRIVATE_KEY');
-  if (!config.apps.gate.id) missing.push('GATE_APP_ID');
-  if (!config.apps.gate.privateKey) missing.push('GATE_APP_PRIVATE_KEY');
-  if (webhook && !config.github.webhookSecret) missing.push('GITHUB_WEBHOOK_SECRET');
-  if (providers && !config.providers.openai.apiKey) missing.push('OPENAI_API_KEY');
-  if (providers && !config.providers.anthropic.apiKey) missing.push('ANTHROPIC_API_KEY');
-  if (config.gha.mode === 'offload' && !config.gha.dispatchToken) {
-    if (!config.apps.actions.id) missing.push('ACTIONS_APP_ID');
-    if (!config.apps.actions.privateKey) missing.push('ACTIONS_APP_PRIVATE_KEY');
-  }
-  if (missing.length) throw new Error(`Missing required configuration: ${missing.join(', ')}`);
+function missingRuntimeConfig(config, { webhook, providers }) {
+  return [
+    [!config.apps.orchestrator.id, 'GITHUB_APP_ID'],
+    [!config.apps.orchestrator.privateKey, 'GITHUB_APP_PRIVATE_KEY'],
+    [!config.apps.openai.id, 'OPENAI_REVIEW_APP_ID'],
+    [!config.apps.openai.privateKey, 'OPENAI_REVIEW_APP_PRIVATE_KEY'],
+    [!config.apps.claude.id, 'CLAUDE_REVIEW_APP_ID'],
+    [!config.apps.claude.privateKey, 'CLAUDE_REVIEW_APP_PRIVATE_KEY'],
+    [!config.apps.gate.id, 'GATE_APP_ID'],
+    [!config.apps.gate.privateKey, 'GATE_APP_PRIVATE_KEY'],
+    [webhook && !config.github.webhookSecret, 'GITHUB_WEBHOOK_SECRET'],
+    [providers && !config.providers.openai.apiKey, 'OPENAI_API_KEY'],
+    [providers && !config.providers.anthropic.apiKey, 'ANTHROPIC_API_KEY'],
+    [config.gha.mode === 'offload' && !config.gha.dispatchToken && !config.apps.actions.id, 'ACTIONS_APP_ID'],
+    [config.gha.mode === 'offload' && !config.gha.dispatchToken && !config.apps.actions.privateKey, 'ACTIONS_APP_PRIVATE_KEY'],
+  ]
+    .filter(([missing]) => missing)
+    .map(([, key]) => key);
+}
 
-  if (!config.security?.allowSharedAppIdentity) {
-    const identities = [
-      ['orchestrator', config.apps.orchestrator.id],
-      ['openai', config.apps.openai.id],
-      ['claude', config.apps.claude.id],
-      ['gate', config.apps.gate.id],
-    ];
-    const seen = new Map();
-    for (const [role, id] of identities) {
-      const normalized = String(id);
-      const previous = seen.get(normalized);
-      if (previous) {
-        throw new Error(`GitHub App identities must be distinct: ${previous} and ${role} both use App ID ${normalized}`);
-      }
-      seen.set(normalized, role);
-    }
-  }
+function sharedIdentityError(config) {
+  if (config.security?.allowSharedAppIdentity) return null;
 
-  for (const context of Object.keys(config.review.requiredCiAppIds ?? {})) {
-    if (!config.review.requiredCiContexts.includes(context)) {
-      throw new Error(`REQUIRED_CI_APP_IDS context is not required by REQUIRED_CI_CONTEXTS: ${context}`);
-    }
-  }
+  const identities = [
+    ['orchestrator', config.apps.orchestrator.id],
+    ['openai', config.apps.openai.id],
+    ['claude', config.apps.claude.id],
+    ['gate', config.apps.gate.id],
+  ].map(([role, id]) => [role, String(id)]);
+
+  const duplicate = identities.find(
+    ([, id], index) => identities.slice(0, index).some(([, previousId]) => previousId === id),
+  );
+  if (!duplicate) return null;
+
+  const [role, id] = duplicate;
+  const [previous] = identities.find(([, candidate]) => candidate === id);
+  return `GitHub App identities must be distinct: ${previous} and ${role} both use App ID ${id}`;
+}
+
+/// Return the first runtime configuration violation as a value.
+///
+/// This is the pure validation core. It does not mutate `config`, accumulate
+/// caller-owned state, or throw. `validateRuntimeConfig` remains the imperative
+/// startup shell for existing call sites that expect exceptions.
+export function runtimeConfigError(config, { webhook = true, providers = true } = {}) {
+  const missing = missingRuntimeConfig(config, { webhook, providers });
+  if (missing.length) return `Missing required configuration: ${missing.join(', ')}`;
+
+  const identityError = sharedIdentityError(config);
+  if (identityError) return identityError;
+
+  const unexpectedContext = Object.keys(config.review.requiredCiAppIds ?? {})
+    .find((context) => !config.review.requiredCiContexts.includes(context));
+  return unexpectedContext
+    ? `REQUIRED_CI_APP_IDS context is not required by REQUIRED_CI_CONTEXTS: ${unexpectedContext}`
+    : null;
+}
+
+export function validateRuntimeConfig(config, options = {}) {
+  const error = runtimeConfigError(config, options);
+  if (error) throw new Error(error);
 }
 
 export function ownerIsAllowed(config, owner) {
