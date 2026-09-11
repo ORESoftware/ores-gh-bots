@@ -129,7 +129,7 @@ export function loadConfig(env = process.env) {
     queue: {
       path: optionalString(env.QUEUE_PATH) ?? DEFAULTS.queuePath,
       pollMs: integer(env.QUEUE_POLL_MS, DEFAULTS.queuePollMs, { min: 50 }),
-      leaseMs: integer(env.QUEUE_LEASE_MS, DEFAULTS.leaseMs ?? DEFAULTS.queueLeaseMs, { min: 10_000 }),
+      leaseMs: integer(env.QUEUE_LEASE_MS, DEFAULTS.queueLeaseMs, { min: 10_000 }),
       maxAttempts: integer(env.QUEUE_MAX_ATTEMPTS, DEFAULTS.queueMaxAttempts, { min: 1 }),
       workerConcurrency: integer(env.WORKER_CONCURRENCY, DEFAULTS.workerConcurrency, { min: 1, max: 32 }),
     },
