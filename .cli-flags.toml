@@ -1,3 +1,7 @@
+[env]
+load = false
+files = []
+
 [parse]
 command_env = "ORES_GH_BOTS_COMMAND"
 positionals_env = "ORES_GH_BOTS_POSITIONALS"
