@@ -4,15 +4,15 @@ import { createLogger, loadConfig, Metrics, redactObject, validateRuntimeConfig 
 import { SqliteQueue } from '../../../packages/queue/src/index.mjs';
 import { ReviewEngine } from '../../../packages/engine/src/index.mjs';
 
+/** Fold argv into a flag map; a `--flag` without `=value` consumes the next argument. */
 function args(argv) {
-  const output = {};
-  for (let index = 0; index < argv.length; index += 1) {
-    const item = argv[index];
-    if (!item.startsWith('--')) continue;
+  const { flags } = argv.reduce((state, item, index) => {
+    if (state.skipNext) return { ...state, skipNext: false };
+    if (!item.startsWith('--')) return state;
     const [key, inline] = item.slice(2).split('=', 2);
-    output[key] = inline ?? argv[++index];
-  }
-  return output;
+    return { flags: { ...state.flags, [key]: inline ?? argv[index + 1] }, skipNext: inline === undefined };
+  }, { flags: {}, skipNext: false });
+  return flags;
 }
 
 const input = args(process.argv.slice(2));
@@ -20,7 +20,7 @@ const owner = input.owner ?? process.env.REVIEW_OWNER;
 const repo = input.repo ?? process.env.REVIEW_REPO;
 const prNumber = Number(input['pr-number'] ?? process.env.REVIEW_PR_NUMBER);
 const headSha = input['head-sha'] ?? process.env.REVIEW_HEAD_SHA ?? null;
-let installationId = Number(input['installation-id'] ?? process.env.REVIEW_INSTALLATION_ID ?? 0);
+const requestedInstallationId = Number(input['installation-id'] ?? process.env.REVIEW_INSTALLATION_ID ?? 0);
 if (!owner || !repo || !Number.isInteger(prNumber) || prNumber < 1) {
   throw new Error('Usage: npm run review -- --owner OWNER --repo REPO --pr-number NUMBER [--head-sha SHA] [--installation-id ID]');
 }
@@ -32,7 +32,7 @@ const metrics = new Metrics();
 const queue = new SqliteQueue({ path: ':memory:', maxAttempts: 1 });
 const client = new GitHubClient({ apiBaseUrl: config.github.apiBaseUrl, apiVersion: config.github.apiVersion });
 const auth = new AppAuth({ client, apps: config.apps, logger });
-if (!installationId) installationId = await auth.installationIdForRepo('orchestrator', owner, repo);
+const installationId = requestedInstallationId || await auth.installationIdForRepo('orchestrator', owner, repo);
 const engine = new ReviewEngine({ config, client, auth, queue, logger, metrics });
 
 try {

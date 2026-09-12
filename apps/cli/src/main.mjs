@@ -14,17 +14,22 @@ import { createLogger, loadConfig, ownerIsAllowed, redactObject, validateRuntime
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
+/**
+ * Fold argv into `{ positional, flags }`. A `--flag` without an inline `=value`
+ * takes the following argument unless that argument is itself a flag; `skipNext`
+ * carries "the next argument was consumed" from one step to the next as state
+ * rather than by advancing a shared index.
+ */
 function parseArgs(argv) {
-  const positional = [];
-  const flags = {};
-  for (let index = 0; index < argv.length; index += 1) {
-    const item = argv[index];
-    if (!item.startsWith('--')) positional.push(item);
-    else {
-      const [key, inline] = item.slice(2).split('=', 2);
-      flags[key] = inline ?? (argv[index + 1]?.startsWith('--') ? true : argv[++index] ?? true);
-    }
-  }
+  const { positional, flags } = argv.reduce((state, item, index) => {
+    if (state.skipNext) return { ...state, skipNext: false };
+    if (!item.startsWith('--')) return { ...state, positional: [...state.positional, item] };
+    const [key, inline] = item.slice(2).split('=', 2);
+    if (inline !== undefined) return { ...state, flags: { ...state.flags, [key]: inline } };
+    const next = argv[index + 1];
+    const takesNext = next !== undefined && !next.startsWith('--');
+    return { ...state, flags: { ...state.flags, [key]: takesNext ? next : true }, skipNext: takesNext };
+  }, { positional: [], flags: {}, skipNext: false });
   return { positional, flags };
 }
 

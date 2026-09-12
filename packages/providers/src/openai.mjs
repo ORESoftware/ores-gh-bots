@@ -31,14 +31,12 @@ export function buildOpenAIRequest({ model, maxOutputTokens, context }) {
 
 export function extractOpenAIText(response) {
   if (typeof response?.output_text === 'string') return response.output_text;
-  const texts = [];
-  for (const item of response?.output ?? []) {
-    if (item.type !== 'message') continue;
-    for (const content of item.content ?? []) {
-      if (content.type === 'output_text' && typeof content.text === 'string') texts.push(content.text);
+  const texts = (response?.output ?? [])
+    .filter((item) => item.type === 'message')
+    .flatMap((item) => (item.content ?? []).flatMap((content) => {
       if (content.type === 'refusal') throw new Error(`OpenAI refused the review: ${content.refusal ?? 'unspecified refusal'}`);
-    }
-  }
+      return content.type === 'output_text' && typeof content.text === 'string' ? [content.text] : [];
+    }));
   if (!texts.length) throw new Error('OpenAI response did not contain output text');
   return texts.join('');
 }

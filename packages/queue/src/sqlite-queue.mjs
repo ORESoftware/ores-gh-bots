@@ -135,10 +135,7 @@ export class SqliteQueue {
         this.db.exec('COMMIT');
         return { duplicate: true, inserted: 0, jobCount: jobs.length };
       }
-      let inserted = 0;
-      for (const job of jobs) {
-        if (this.enqueue(job).inserted) inserted += 1;
-      }
+      const inserted = jobs.filter((job) => this.enqueue(job).inserted).length;
       this.db.exec('COMMIT');
       return { duplicate: false, inserted, jobCount: jobs.length };
     } catch (error) {
@@ -282,13 +279,12 @@ export class SqliteQueue {
     const rows = this.db.prepare(`
       SELECT * FROM reviews WHERE owner = ? AND repo = ? AND pr_number = ? AND head_sha = ?
     `).all(owner, repo, prNumber, headSha);
-    const reviews = {};
-    for (const row of rows) {
-      reviews[row.provider] = row.error
+    return Object.fromEntries(rows.map((row) => [
+      row.provider,
+      row.error
         ? { error: row.error, checkRunId: row.check_run_id }
-        : { ...parseJson(row.result_json, {}), checkRunId: row.check_run_id };
-    }
-    return reviews;
+        : { ...parseJson(row.result_json, {}), checkRunId: row.check_run_id },
+    ]));
   }
 
   stats() {

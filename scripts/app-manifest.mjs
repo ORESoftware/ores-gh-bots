@@ -8,19 +8,20 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const modulePath = fileURLToPath(import.meta.url);
 const defaultStateMaxAgeMs = 2 * 60 * 60 * 1_000;
 
+/** Every option is a `--flag value` pair, so the arguments after the command are read two at a time. */
+function optionPairs(argv) {
+  return Array.from({ length: Math.ceil((argv.length - 1) / 2) }, (_, pair) => [argv[1 + pair * 2], argv[2 + pair * 2]]);
+}
+
 export function parseOptions(argv) {
   const command = argv[0];
-  const options = {};
-  for (let index = 1; index < argv.length; index += 1) {
-    const flag = argv[index];
+  const options = optionPairs(argv).reduce((accepted, [flag, value]) => {
     if (!flag.startsWith('--')) throw new Error(`Unexpected argument: ${flag}`);
     const key = flag.slice(2);
-    const value = argv[index + 1];
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${flag}`);
-    if (Object.hasOwn(options, key)) throw new Error(`Duplicate option: ${flag}`);
-    options[key] = value;
-    index += 1;
-  }
+    if (Object.hasOwn(accepted, key)) throw new Error(`Duplicate option: ${flag}`);
+    return { ...accepted, [key]: value };
+  }, {});
   return { command, options };
 }
 
@@ -170,12 +171,9 @@ async function verifyCallbackState(options, role, {
     env,
   });
 
-  let record;
-  try {
-    record = JSON.parse(await readFile(stateFile, 'utf8'));
-  } catch (error) {
+  const record = await readFile(stateFile, 'utf8').then(JSON.parse).catch((error) => {
     throw new Error(`Could not read a valid manifest state record: ${error.message}`);
-  }
+  });
   if (record?.version !== 1 || record.role !== role || typeof record.state !== 'string') {
     throw new Error('Manifest state record does not match the requested App role');
   }
@@ -242,9 +240,9 @@ export async function convertManifest(options, {
     `# Generated for role=${role}; app_slug=${result.slug ?? 'unknown'}`,
     `${mapping.id}=${result.id}`,
     `${mapping.pem}=${dotenvValue(result.pem)}`,
+    ...(mapping.webhook ? [`${mapping.webhook}=${dotenvValue(result.webhook_secret)}`] : []),
+    '',
   ];
-  if (mapping.webhook) lines.push(`${mapping.webhook}=${dotenvValue(result.webhook_secret)}`);
-  lines.push('');
 
   await writePrivateFile(output, lines.join('\n'));
   await unlink(stateFile);
