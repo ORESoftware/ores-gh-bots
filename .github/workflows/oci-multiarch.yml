@@ -1,0 +1,202 @@
+name: OCI multi-architecture
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile.arm64.dkf
+      - Dockerfile.x86_64.dkf
+      - entrypoint.sh
+      - .github/workflows/oci-multiarch.yml
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile.arm64.dkf
+      - Dockerfile.x86_64.dkf
+      - entrypoint.sh
+      - .github/workflows/oci-multiarch.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oci-multiarch-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-probe:
+    name: ${{ matrix.name }} (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: arm64
+            platform: linux/arm64
+            dockerfile: Dockerfile.arm64.dkf
+            image_arch: arm64
+            target_arch: arm64
+          - name: x86_64
+            platform: linux/amd64
+            dockerfile: Dockerfile.x86_64.dkf
+            image_arch: amd64
+            target_arch: amd64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove immutable canonical Dockerfile and wrapper mode
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          base_ref="${GITHUB_BASE_REF:-main}"
+          git fetch --no-tags origin "+refs/heads/${base_ref}:refs/remotes/origin/${base_ref}"
+          git diff --exit-code "origin/${base_ref}...HEAD" -- Dockerfile
+          test "$(git ls-files -s entrypoint.sh | awk '{print $1}')" = "100755"
+          test "$(head -n 1 entrypoint.sh)" = "#!/bin/sh"
+          grep -Fx 'exec "$@"' entrypoint.sh
+          ! grep -En '(^|[[:space:]])(&\||\|&)([[:space:]]|$)|"\$@"[[:space:]]*&|\beval\b|\$\*' entrypoint.sh
+
+      - name: Validate architecture contract
+        shell: bash
+        env:
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          PLATFORM: ${{ matrix.platform }}
+          TARGET_ARCH: ${{ matrix.target_arch }}
+        run: |
+          set -Eeuo pipefail
+          grep -Fx "# ores-expected-target: ${PLATFORM}" "${DOCKERFILE}"
+          grep -Fx 'ARG TARGETPLATFORM' "${DOCKERFILE}"
+          grep -Fx 'ARG TARGETOS' "${DOCKERFILE}"
+          grep -Fx 'ARG TARGETARCH' "${DOCKERFILE}"
+          grep -F 'FROM --platform=$TARGETPLATFORM ' "${DOCKERFILE}"
+          grep -F 'test "${TARGETOS:?TARGETOS is required}" = "linux"' "${DOCKERFILE}"
+          grep -F "test \"\${TARGETARCH:?TARGETARCH is required}\" = \"${TARGET_ARCH}\"" "${DOCKERFILE}"
+          grep -Fx 'COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh' "${DOCKERFILE}"
+          grep -Fx 'ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]' "${DOCKERFILE}"
+          grep -Fx 'CMD ["node", "apps/orchestrator/src/main.mjs"]' "${DOCKERFILE}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build target image
+        shell: bash
+        env:
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          PLATFORM: ${{ matrix.platform }}
+          IMAGE: ores-gh-bots:oci-${{ matrix.name }}-${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          docker buildx build \
+            --platform "${PLATFORM}" \
+            --file "${DOCKERFILE}" \
+            --tag "${IMAGE}" \
+            --load \
+            .
+
+      - name: Verify image metadata and configured command
+        shell: bash
+        env:
+          IMAGE: ores-gh-bots:oci-${{ matrix.name }}-${{ github.sha }}
+          IMAGE_ARCH: ${{ matrix.image_arch }}
+        run: |
+          set -Eeuo pipefail
+          test "$(docker image inspect --format '{{.Architecture}}' "${IMAGE}")" = "${IMAGE_ARCH}"
+          test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "${IMAGE}")" = '["/usr/local/bin/entrypoint.sh"]'
+          test "$(docker image inspect --format '{{json .Config.Cmd}}' "${IMAGE}")" = '["node","apps/orchestrator/src/main.mjs"]'
+          test "$(docker image inspect --format '{{.Config.User}}' "${IMAGE}")" = 'node'
+
+      - name: Prove exact argv and exit-code forwarding
+        shell: bash
+        env:
+          IMAGE: ores-gh-bots:oci-${{ matrix.name }}-${{ github.sha }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -Eeuo pipefail
+          docker run --rm --platform "${PLATFORM}" "${IMAGE}" \
+            sh -c 'test "$#" -eq 3 && test "$1" = "a b" && test "$2" = "*" && test "$3" = "semi;colon"' \
+            verify 'a b' '*' 'semi;colon'
+
+          set +e
+          docker run --rm --platform "${PLATFORM}" "${IMAGE}" sh -c 'exit 37'
+          status=$?
+          set -e
+          test "${status}" -eq 37
+
+      - name: Prove PID 1 and SIGTERM behavior
+        shell: bash
+        env:
+          IMAGE: ores-gh-bots:oci-${{ matrix.name }}-${{ github.sha }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -Eeuo pipefail
+          cid=$(docker run --detach --platform "${PLATFORM}" "${IMAGE}" \
+            sh -c 'trap "exit 0" TERM INT; while :; do sleep 1; done')
+          cleanup() { docker rm --force "${cid}" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 20); do
+            [ "$(docker inspect --format '{{.State.Running}}' "${cid}")" = 'true' ] && break
+            sleep 0.25
+          done
+          test "$(docker exec "${cid}" cat /proc/1/comm)" = 'sh'
+          docker stop --time 5 "${cid}"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "${cid}")" = '0'
+          docker rm "${cid}"
+          trap - EXIT
+
+      - name: Smoke-test the default CMD and health endpoint
+        shell: bash
+        env:
+          IMAGE: ores-gh-bots:oci-${{ matrix.name }}-${{ github.sha }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -Eeuo pipefail
+          cid=$(docker run --detach --platform "${PLATFORM}" --publish 127.0.0.1::8080 \
+            --env GITHUB_APP_ID=1 \
+            --env GITHUB_APP_PRIVATE_KEY=dummy \
+            --env OPENAI_REVIEW_APP_ID=2 \
+            --env OPENAI_REVIEW_APP_PRIVATE_KEY=dummy \
+            --env CLAUDE_REVIEW_APP_ID=3 \
+            --env CLAUDE_REVIEW_APP_PRIVATE_KEY=dummy \
+            --env GATE_APP_ID=4 \
+            --env GATE_APP_PRIVATE_KEY=dummy \
+            --env GITHUB_WEBHOOK_SECRET=dummy \
+            --env GHA_MODE=offload \
+            --env GHA_DISPATCH_TOKEN=dummy \
+            --env RECONCILE_ENABLED=false \
+            --env QUEUE_PATH=/tmp/ores-gh-bots-ci.sqlite \
+            "${IMAGE}")
+          cleanup() { docker rm --force "${cid}" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+
+          port=$(docker port "${cid}" 8080/tcp | awk -F: 'NR == 1 { print $NF }')
+          test -n "${port}"
+          healthy=false
+          for _ in $(seq 1 30); do
+            if node -e "fetch('http://127.0.0.1:${port}/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"; then
+              healthy=true
+              break
+            fi
+            if [ "$(docker inspect --format '{{.State.Running}}' "${cid}")" != 'true' ]; then
+              docker logs "${cid}"
+              exit 1
+            fi
+            sleep 1
+          done
+          test "${healthy}" = 'true'
+          test "$(docker inspect --format '{{json .State.Health.Status}}' "${cid}")" != '"unhealthy"'
+
+          docker stop --time 10 "${cid}"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "${cid}")" = '0'
+          docker rm "${cid}"
+          trap - EXIT
