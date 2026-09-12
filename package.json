@@ -29,7 +29,8 @@
     "verify:repository": "node scripts/verify-repository.mjs",
     "verify:github-apps": "node scripts/verify-github-apps.mjs",
     "verify:fleet-hardening": "node scripts/verify-fleet-hardening.mjs",
-    "verify": "npm run verify:repository && npm run verify:github-apps && npm run verify:fleet-hardening"
+    "verify": "npm run verify:repository && npm run verify:github-apps && npm run verify:fleet-hardening",
+    "ci:classify": "node scripts/classify-workflow-evidence.mjs"
   },
   "comments": {
     "typecheck": "The nightly reconciler and its tests use only Node built-ins, so there is no install step; `npm run typecheck` pulls typescript/@types/node through npx on demand so the workspace lockfile stays dependency-free (`npm ci --ignore-scripts` in CI)."
