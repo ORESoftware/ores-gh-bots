@@ -24,12 +24,11 @@ function parseRetryAfter(response, body) {
 }
 
 function linkNext(header) {
-  if (!header) return null;
-  for (const part of header.split(',')) {
-    const match = part.match(/<([^>]+)>;\s*rel="([^"]+)"/);
-    if (match?.[2] === 'next') return match[1];
-  }
-  return null;
+  const next = (header ?? '')
+    .split(',')
+    .map((part) => part.match(/<([^>]+)>;\s*rel="([^"]+)"/))
+    .find((match) => match?.[2] === 'next');
+  return next ? next[1] : null;
 }
 
 export class GitHubClient {
@@ -101,15 +100,15 @@ export class GitHubClient {
   }
 
   async paginate(path, { token, map = (value) => value, maxPages = 100, signal } = {}) {
-    const results = [];
-    let next = path;
-    for (let page = 0; next && page < maxPages; page += 1) {
+    // Each page extends the collected list with a new array; `next` and `page`
+    // are parameters of the recursion rather than variables reassigned in a loop.
+    const collect = async (next, page, collected) => {
+      if (!next || page >= maxPages) return collected;
       const response = await this.request('GET', next, { token, signal });
       const values = map(response.data);
       if (!Array.isArray(values)) throw new Error(`Pagination mapper did not return an array for ${next}`);
-      results.push(...values);
-      next = linkNext(response.headers.get('link'));
-    }
-    return results;
+      return collect(linkNext(response.headers.get('link')), page + 1, [...collected, ...values]);
+    };
+    return collect(path, 0, []);
   }
 }

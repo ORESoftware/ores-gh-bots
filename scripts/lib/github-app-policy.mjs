@@ -19,77 +19,221 @@ function roleNames(policy) {
   return Object.keys(policy?.apps ?? {});
 }
 
+/** `[message]` when `failed` holds, otherwise nothing: the building block every rule below is made of. */
+function errorWhen(failed, message) {
+  return failed ? [message] : [];
+}
+
+function positiveIntegerOrNull(value) {
+  return value === null || (Number.isInteger(value) && value > 0);
+}
+
+/** Parse one dotenv line into `{ key, value }`, or `null` for blank and comment lines. */
+function parseDotenvLine(rawLine, index) {
+  const line = rawLine.trim();
+  if (!line || line.startsWith('#')) return null;
+  const equals = rawLine.indexOf('=');
+  if (equals < 1) throw new Error(`Invalid dotenv entry on line ${index + 1}`);
+  const key = rawLine.slice(0, equals).trim();
+  if (!/^[A-Z][A-Z0-9_]*$/u.test(key)) throw new Error(`Invalid dotenv key ${key} on line ${index + 1}`);
+  return { key, value: rawLine.slice(equals + 1) };
+}
+
 export function parseDotenv(text) {
-  const values = {};
-  const duplicates = [];
-  for (const [index, rawLine] of text.split(/\r?\n/u).entries()) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const equals = rawLine.indexOf('=');
-    if (equals < 1) throw new Error(`Invalid dotenv entry on line ${index + 1}`);
-    const key = rawLine.slice(0, equals).trim();
-    const value = rawLine.slice(equals + 1);
-    if (!/^[A-Z][A-Z0-9_]*$/u.test(key)) throw new Error(`Invalid dotenv key ${key} on line ${index + 1}`);
-    if (Object.hasOwn(values, key)) duplicates.push(key);
-    values[key] = value;
-  }
-  return { values, duplicates };
+  const entries = text.split(/\r?\n/u).map(parseDotenvLine).filter(Boolean);
+  // Later entries win, as successive assignment did; every repeated key is reported in order.
+  return entries.reduce(
+    ({ values, duplicates }, { key, value }) => ({
+      values: { ...values, [key]: value },
+      duplicates: Object.hasOwn(values, key) ? [...duplicates, key] : duplicates,
+    }),
+    { values: {}, duplicates: [] },
+  );
 }
 
-function validateInstallation(role, appPolicy, appInventory, centralRepository, errors) {
-  if (!appInventory || typeof appInventory !== 'object') {
-    errors.push(`${role}: missing installation inventory`);
-    return;
-  }
-  if (appInventory.visibility !== appPolicy.visibility) {
-    errors.push(`${role}: inventory visibility ${appInventory.visibility ?? '<missing>'} does not match ${appPolicy.visibility}`);
-  }
-  if (!(appInventory.appId === null || (Number.isInteger(appInventory.appId) && appInventory.appId > 0))) {
-    errors.push(`${role}: appId must be null or a positive integer`);
-  }
-  if (typeof appInventory.slug !== 'string' || !appInventory.slug) errors.push(`${role}: slug is required`);
+function installationEntryErrors(prefix, installation) {
+  const shapeErrors = [
+    ...errorWhen(typeof installation.account !== 'string' || !installation.account, `${prefix} account is required`),
+    ...errorWhen(!positiveIntegerOrNull(installation.installationId), `${prefix} installationId must be null or a positive integer`),
+    ...errorWhen(!['all', 'selected'].includes(installation.repositorySelection), `${prefix} repositorySelection must be all or selected`),
+  ];
+  if (!Array.isArray(installation.repositories)) return [...shapeErrors, `${prefix} repositories must be an array`];
+  return [
+    ...shapeErrors,
+    ...errorWhen(
+      installation.repositorySelection === 'all' && installation.repositories.length !== 0,
+      `${prefix} all-repository installation must not enumerate repositories`,
+    ),
+    ...errorWhen(
+      installation.repositorySelection === 'selected' && installation.repositories.length === 0,
+      `${prefix} selected-repository installation must enumerate repositories`,
+    ),
+  ];
+}
+
+function centralRepositoryErrors(role, appPolicy, installations, centralRepository) {
+  if (appPolicy.installationScope !== 'central-repository') return [];
+  if (installations.length !== 1) return [`${role}: central-repository App must have exactly one installation entry`];
+  const [installation] = installations;
+  const expectedAccount = centralRepository.split('/')[0];
+  return [
+    ...errorWhen(installation.account !== expectedAccount, `${role}: central-repository App must be installed on ${expectedAccount}`),
+    ...errorWhen(
+      installation.repositorySelection !== 'selected' || !sameJson(installation.repositories, [centralRepository]),
+      `${role}: central-repository App must be restricted to ${centralRepository}`,
+    ),
+  ];
+}
+
+function installationErrors(role, appPolicy, appInventory, centralRepository) {
+  if (!appInventory || typeof appInventory !== 'object') return [`${role}: missing installation inventory`];
+  const identityErrors = [
+    ...errorWhen(
+      appInventory.visibility !== appPolicy.visibility,
+      `${role}: inventory visibility ${appInventory.visibility ?? '<missing>'} does not match ${appPolicy.visibility}`,
+    ),
+    ...errorWhen(!positiveIntegerOrNull(appInventory.appId), `${role}: appId must be null or a positive integer`),
+    ...errorWhen(typeof appInventory.slug !== 'string' || !appInventory.slug, `${role}: slug is required`),
+  ];
   if (!Array.isArray(appInventory.installations) || appInventory.installations.length === 0) {
-    errors.push(`${role}: at least one installation entry is required`);
-    return;
+    return [...identityErrors, `${role}: at least one installation entry is required`];
   }
+  return [
+    ...identityErrors,
+    ...appInventory.installations.flatMap((installation, index) => installationEntryErrors(`${role}: installation ${index + 1}`, installation)),
+    ...centralRepositoryErrors(role, appPolicy, appInventory.installations, centralRepository),
+  ];
+}
 
-  for (const [index, installation] of appInventory.installations.entries()) {
-    const prefix = `${role}: installation ${index + 1}`;
-    if (typeof installation.account !== 'string' || !installation.account) errors.push(`${prefix} account is required`);
-    if (!(installation.installationId === null || (Number.isInteger(installation.installationId) && installation.installationId > 0))) {
-      errors.push(`${prefix} installationId must be null or a positive integer`);
-    }
-    if (!['all', 'selected'].includes(installation.repositorySelection)) {
-      errors.push(`${prefix} repositorySelection must be all or selected`);
-    }
-    if (!Array.isArray(installation.repositories)) {
-      errors.push(`${prefix} repositories must be an array`);
-      continue;
-    }
-    if (installation.repositorySelection === 'all' && installation.repositories.length !== 0) {
-      errors.push(`${prefix} all-repository installation must not enumerate repositories`);
-    }
-    if (installation.repositorySelection === 'selected' && installation.repositories.length === 0) {
-      errors.push(`${prefix} selected-repository installation must enumerate repositories`);
-    }
-  }
-
-  if (appPolicy.installationScope === 'central-repository') {
-    if (appInventory.installations.length !== 1) {
-      errors.push(`${role}: central-repository App must have exactly one installation entry`);
-      return;
-    }
-    const installation = appInventory.installations[0];
-    const expectedAccount = centralRepository.split('/')[0];
-    if (installation.account !== expectedAccount) {
-      errors.push(`${role}: central-repository App must be installed on ${expectedAccount}`);
-    }
-    if (installation.repositorySelection !== 'selected' || !sameJson(installation.repositories, [centralRepository])) {
-      errors.push(`${role}: central-repository App must be restricted to ${centralRepository}`);
-    }
+function httpsUrlErrors(value, label) {
+  try {
+    return errorWhen(new URL(value ?? '').protocol !== 'https:', `orchestrator: ${label} URL must use HTTPS`);
+  } catch {
+    return [`orchestrator: ${label} URL must be valid`];
   }
 }
 
+function webhookErrors(role, manifest) {
+  if (role === 'orchestrator') {
+    return [
+      ...errorWhen(manifest.hook_attributes?.active !== true, 'orchestrator: webhook must be active'),
+      ...httpsUrlErrors(manifest.hook_attributes?.url, 'webhook'),
+      ...httpsUrlErrors(manifest.redirect_url, 'redirect'),
+    ];
+  }
+  return errorWhen(Boolean(manifest.hook_attributes || manifest.redirect_url), `${role}: non-webhook App must not configure hook or redirect URLs`);
+}
+
+function manifestErrors(role, expected, manifest) {
+  const expectedPublic = expected.visibility === 'public-unlisted';
+  return [
+    ...errorWhen(manifest.public !== expectedPublic, `${role}: public must be ${expectedPublic}`),
+    ...errorWhen(
+      !sameJson(manifest.default_permissions ?? {}, expected.permissions ?? {}),
+      `${role}: permission drift; expected ${JSON.stringify(expected.permissions ?? {})}, got ${JSON.stringify(manifest.default_permissions ?? {})}`,
+    ),
+    ...errorWhen(
+      !sameJson(sortedStrings(manifest.default_events ?? []), sortedStrings(expected.events ?? [])),
+      `${role}: event drift; expected ${JSON.stringify(sortedStrings(expected.events ?? []))}, got ${JSON.stringify(sortedStrings(manifest.default_events ?? []))}`,
+    ),
+    ...webhookErrors(role, manifest),
+  ];
+}
+
+/** Errors for one role, plus the secret keys that role expects (none when its manifest is missing). */
+function roleErrors({ role, policy, manifests, inventory, dotenv }) {
+  const expected = policy.apps[role];
+  const manifest = manifests[role];
+  if (!manifest) return { errors: [`${role}: manifest is missing`], secretKeys: [] };
+  const secretKeys = expected.secretEnv ?? [];
+  return {
+    secretKeys,
+    errors: [
+      ...manifestErrors(role, expected, manifest),
+      ...secretKeys.flatMap((key) => errorWhen(!Object.hasOwn(dotenv.values, key), `env template: missing ${key}`)),
+      ...installationErrors(role, expected, inventory?.apps?.[role], policy.centralRepository),
+    ],
+  };
+}
+
+function policyShapeErrors(policy, roles, manifestNames, manifestFiles) {
+  return [
+    ...errorWhen(policy?.version !== 1, 'policy: version must be 1'),
+    ...errorWhen(!/^[^/]+\/[^/]+$/u.test(policy?.centralRepository ?? ''), 'policy: centralRepository must be owner/repo'),
+    ...errorWhen(roles.length === 0, 'policy: at least one App role is required'),
+    ...errorWhen(new Set(manifestNames).size !== manifestNames.length, 'policy: every role must use a unique manifest'),
+    ...(manifestFiles.length > 0
+      ? [
+        ...manifestFiles.filter((name) => !manifestNames.includes(name)).map((name) => `manifest: ${name} is not covered by policy.json`),
+        ...manifestNames.filter((name) => !manifestFiles.includes(name)).map((name) => `manifest: ${name} is listed in policy.json but missing`),
+      ]
+      : []),
+  ];
+}
+
+/** The parsed template plus the errors parsing produced; an unparseable template counts as empty. */
+function parseEnvTemplate(envTemplate) {
+  try {
+    const dotenv = parseDotenv(envTemplate ?? '');
+    return { dotenv, errors: dotenv.duplicates.map((duplicate) => `env template: duplicate key ${duplicate}`) };
+  } catch (error) {
+    return { dotenv: { values: {}, duplicates: [] }, errors: [`env template: ${error.message}`] };
+  }
+}
+
+function inventoryErrors(inventory, policy, roles) {
+  const inventoryRoles = Object.keys(inventory?.apps ?? {});
+  return [
+    ...inventoryRoles.filter((role) => !roles.includes(role)).map((role) => `inventory: unknown App role ${role}`),
+    ...roles.filter((role) => !inventoryRoles.includes(role)).map((role) => `inventory: missing App role ${role}`),
+    ...errorWhen(inventory?.version !== 1, 'inventory: version must be 1'),
+    ...errorWhen(inventory?.centralRepository !== policy?.centralRepository, 'inventory: centralRepository must match policy.json'),
+  ];
+}
+
+const PROVIDER_SECRETS = Object.freeze(['OPENAI_API_KEY', 'ANTHROPIC_API_KEY']);
+
+function secretInventoryErrors(secretInventory, roleSecretKeys, dotenv) {
+  const expectedSecretKeys = new Set([...roleSecretKeys, ...PROVIDER_SECRETS]);
+  const documentedSecretKeys = new Set(secretInventory?.requiredKeys ?? []);
+  return [
+    ...[...expectedSecretKeys]
+      .filter((key) => !documentedSecretKeys.has(key))
+      .map((key) => `secret inventory: missing required key ${key}`),
+    ...[...documentedSecretKeys].flatMap((key) => [
+      ...errorWhen(!expectedSecretKeys.has(key), `secret inventory: undocumented extra key ${key}`),
+      ...errorWhen(!Object.hasOwn(dotenv.values, key), `env template: missing required secret ${key}`),
+    ]),
+    ...errorWhen(secretInventory?.version !== 1, 'secret inventory: version must be 1'),
+    ...errorWhen(secretInventory?.encryptedSource !== 'env/enc/review-bots.env', 'secret inventory: unexpected encrypted source'),
+    ...errorWhen(secretInventory?.plaintextDestination !== 'env/dec/review-bots.env', 'secret inventory: unexpected plaintext destination'),
+    ...errorWhen(secretInventory?.deployment?.provider !== 'kubernetes', 'secret inventory: deployment provider must be kubernetes'),
+    ...errorWhen(
+      !secretInventory?.deployment?.namespace || !secretInventory?.deployment?.secretName,
+      'secret inventory: Kubernetes namespace and secretName are required',
+    ),
+    ...errorWhen(
+      secretInventory?.rotation?.preserveAppIdentity !== true
+        || secretInventory?.rotation?.preserveQueueStorage !== true
+        || secretInventory?.rotation?.privateKeyOverlapRequired !== true,
+      'secret inventory: rotation invariants are incomplete',
+    ),
+  ];
+}
+
+const CREDENTIAL_PATTERN = /(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|lin_api_[A-Za-z0-9]{20,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)/u;
+
+function credentialErrors(dotenv) {
+  return Object.entries(dotenv.values)
+    .filter(([, value]) => CREDENTIAL_PATTERN.test(value))
+    .map(([key]) => `env template: ${key} contains credential-like material`);
+}
+
+/**
+ * Validate the policy documents and return every error, in the same order the
+ * checks run. Each section is a pure function from documents to an error list;
+ * the sections are concatenated here rather than pushing into a shared array.
+ */
 export function validatePolicyDocuments({
   policy,
   manifests,
@@ -98,122 +242,27 @@ export function validatePolicyDocuments({
   secretInventory,
   envTemplate,
 }) {
-  const errors = [];
-  if (policy?.version !== 1) errors.push('policy: version must be 1');
-  if (!/^[^/]+\/[^/]+$/u.test(policy?.centralRepository ?? '')) errors.push('policy: centralRepository must be owner/repo');
-
   const roles = roleNames(policy);
-  if (roles.length === 0) errors.push('policy: at least one App role is required');
   const manifestNames = roles.map((role) => policy.apps[role]?.manifest).filter(Boolean);
-  if (new Set(manifestNames).size !== manifestNames.length) errors.push('policy: every role must use a unique manifest');
-
-  if (manifestFiles.length > 0) {
-    const unexpected = manifestFiles.filter((name) => !manifestNames.includes(name));
-    const missing = manifestNames.filter((name) => !manifestFiles.includes(name));
-    for (const name of unexpected) errors.push(`manifest: ${name} is not covered by policy.json`);
-    for (const name of missing) errors.push(`manifest: ${name} is listed in policy.json but missing`);
-  }
-
-  let dotenv;
-  try {
-    dotenv = parseDotenv(envTemplate ?? '');
-  } catch (error) {
-    errors.push(`env template: ${error.message}`);
-    dotenv = { values: {}, duplicates: [] };
-  }
-  for (const duplicate of dotenv.duplicates) errors.push(`env template: duplicate key ${duplicate}`);
-
-  const expectedSecretKeys = new Set();
-  for (const role of roles) {
-    const expected = policy.apps[role];
-    const manifest = manifests[role];
-    if (!manifest) {
-      errors.push(`${role}: manifest is missing`);
-      continue;
-    }
-    const expectedPublic = expected.visibility === 'public-unlisted';
-    if (manifest.public !== expectedPublic) {
-      errors.push(`${role}: public must be ${expectedPublic}`);
-    }
-    if (!sameJson(manifest.default_permissions ?? {}, expected.permissions ?? {})) {
-      errors.push(`${role}: permission drift; expected ${JSON.stringify(expected.permissions ?? {})}, got ${JSON.stringify(manifest.default_permissions ?? {})}`);
-    }
-    if (!sameJson(sortedStrings(manifest.default_events ?? []), sortedStrings(expected.events ?? []))) {
-      errors.push(`${role}: event drift; expected ${JSON.stringify(sortedStrings(expected.events ?? []))}, got ${JSON.stringify(sortedStrings(manifest.default_events ?? []))}`);
-    }
-    if (role === 'orchestrator') {
-      if (manifest.hook_attributes?.active !== true) errors.push('orchestrator: webhook must be active');
-      try {
-        const hookUrl = new URL(manifest.hook_attributes?.url ?? '');
-        if (hookUrl.protocol !== 'https:') errors.push('orchestrator: webhook URL must use HTTPS');
-      } catch {
-        errors.push('orchestrator: webhook URL must be valid');
-      }
-      try {
-        const redirectUrl = new URL(manifest.redirect_url ?? '');
-        if (redirectUrl.protocol !== 'https:') errors.push('orchestrator: redirect URL must use HTTPS');
-      } catch {
-        errors.push('orchestrator: redirect URL must be valid');
-      }
-    } else if (manifest.hook_attributes || manifest.redirect_url) {
-      errors.push(`${role}: non-webhook App must not configure hook or redirect URLs`);
-    }
-
-    for (const key of expected.secretEnv ?? []) {
-      expectedSecretKeys.add(key);
-      if (!Object.hasOwn(dotenv.values, key)) errors.push(`env template: missing ${key}`);
-    }
-
-    validateInstallation(role, expected, inventory?.apps?.[role], policy.centralRepository, errors);
-  }
-
-  const inventoryRoles = Object.keys(inventory?.apps ?? {});
-  for (const role of inventoryRoles.filter((role) => !roles.includes(role))) errors.push(`inventory: unknown App role ${role}`);
-  for (const role of roles.filter((role) => !inventoryRoles.includes(role))) errors.push(`inventory: missing App role ${role}`);
-  if (inventory?.version !== 1) errors.push('inventory: version must be 1');
-  if (inventory?.centralRepository !== policy?.centralRepository) {
-    errors.push('inventory: centralRepository must match policy.json');
-  }
-
-  const providerSecrets = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY'];
-  for (const key of providerSecrets) expectedSecretKeys.add(key);
-  const documentedSecretKeys = new Set(secretInventory?.requiredKeys ?? []);
-  for (const key of expectedSecretKeys) {
-    if (!documentedSecretKeys.has(key)) errors.push(`secret inventory: missing required key ${key}`);
-  }
-  for (const key of documentedSecretKeys) {
-    if (!expectedSecretKeys.has(key)) errors.push(`secret inventory: undocumented extra key ${key}`);
-    if (!Object.hasOwn(dotenv.values, key)) errors.push(`env template: missing required secret ${key}`);
-  }
-  if (secretInventory?.version !== 1) errors.push('secret inventory: version must be 1');
-  if (secretInventory?.encryptedSource !== 'env/enc/review-bots.env') errors.push('secret inventory: unexpected encrypted source');
-  if (secretInventory?.plaintextDestination !== 'env/dec/review-bots.env') errors.push('secret inventory: unexpected plaintext destination');
-  if (secretInventory?.deployment?.provider !== 'kubernetes') errors.push('secret inventory: deployment provider must be kubernetes');
-  if (!secretInventory?.deployment?.namespace || !secretInventory?.deployment?.secretName) {
-    errors.push('secret inventory: Kubernetes namespace and secretName are required');
-  }
-  if (secretInventory?.rotation?.preserveAppIdentity !== true
-    || secretInventory?.rotation?.preserveQueueStorage !== true
-    || secretInventory?.rotation?.privateKeyOverlapRequired !== true) {
-    errors.push('secret inventory: rotation invariants are incomplete');
-  }
-
-  const credentialPattern = /(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|lin_api_[A-Za-z0-9]{20,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)/u;
-  for (const [key, value] of Object.entries(dotenv.values)) {
-    if (credentialPattern.test(value)) errors.push(`env template: ${key} contains credential-like material`);
-  }
-
-  return errors;
+  const env = parseEnvTemplate(envTemplate);
+  const perRole = roles.map((role) => roleErrors({ role, policy, manifests, inventory, dotenv: env.dotenv }));
+  return [
+    ...policyShapeErrors(policy, roles, manifestNames, manifestFiles),
+    ...env.errors,
+    ...perRole.flatMap((result) => result.errors),
+    ...inventoryErrors(inventory, policy, roles),
+    ...secretInventoryErrors(secretInventory, perRole.flatMap((result) => result.secretKeys), env.dotenv),
+    ...credentialErrors(env.dotenv),
+  ];
 }
 
 export async function loadPolicyDocuments(root) {
   const appDirectory = join(root, 'github-apps');
   const policy = JSON.parse(await readFile(join(appDirectory, 'policy.json'), 'utf8'));
   const manifestFiles = (await readdir(appDirectory)).filter((name) => name.endsWith('.manifest.json')).sort();
-  const manifests = {};
-  for (const [role, entry] of Object.entries(policy.apps ?? {})) {
-    manifests[role] = JSON.parse(await readFile(join(appDirectory, entry.manifest), 'utf8'));
-  }
+  const manifests = Object.fromEntries(await Promise.all(
+    Object.entries(policy.apps ?? {}).map(async ([role, entry]) => [role, JSON.parse(await readFile(join(appDirectory, entry.manifest), 'utf8'))]),
+  ));
   const inventory = JSON.parse(await readFile(join(root, 'config/installations.example.json'), 'utf8'));
   const secretInventory = JSON.parse(await readFile(join(root, 'config/secrets.example.json'), 'utf8'));
   const envTemplate = await readFile(join(root, '.env.example'), 'utf8');

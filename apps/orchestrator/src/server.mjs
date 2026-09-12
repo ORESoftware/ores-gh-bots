@@ -16,6 +16,10 @@ function json(response, status, body) {
   response.end(data);
 }
 
+// HOT-PATH (imperative by design): per-request webhook body assembly; the body
+// arrives as a stream and rebuilding a concatenated Buffer per chunk would be
+// O(n^2) in body size; the chunk list and running size live only inside this
+// function; callers receive one immutable Buffer of the whole body.
 async function readBody(request, limit) {
   const chunks = [];
   let size = 0;

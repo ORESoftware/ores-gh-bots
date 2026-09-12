@@ -11,20 +11,22 @@ const PATTERNS = [
   ['url-credential', /\bhttps?:\/\/[^\s/@:]+:[^\s/@]+@/gi],
 ];
 
-export function redactText(value) {
-  let text = String(value ?? '');
-  for (const [name, pattern] of PATTERNS) {
-    text = text.replace(pattern, (match, prefix) => {
-      if (name === 'authorization' || name === 'secret-assignment') {
-        return `${prefix ?? ''}[REDACTED:${name}]`;
-      }
-      if (name === 'url-credential') {
-        return match.replace(/\/\/.*@/, '//[REDACTED:url-credential]@');
-      }
-      return `[REDACTED:${name}]`;
-    });
+function redactMatch(name, match, prefix) {
+  if (name === 'authorization' || name === 'secret-assignment') {
+    return `${prefix ?? ''}[REDACTED:${name}]`;
   }
-  return text;
+  if (name === 'url-credential') {
+    return match.replace(/\/\/.*@/, '//[REDACTED:url-credential]@');
+  }
+  return `[REDACTED:${name}]`;
+}
+
+export function redactText(value) {
+  // Each pattern is applied to the output of the previous one, in table order.
+  return PATTERNS.reduce(
+    (text, [name, pattern]) => text.replace(pattern, (match, prefix) => redactMatch(name, match, prefix)),
+    String(value ?? ''),
+  );
 }
 
 export function redactObject(value) {

@@ -31,16 +31,20 @@ function detailsUrl(config, owner, repo, prNumber, headSha) {
   return `${base}/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${prNumber}/${headSha}`;
 }
 
+function providerSummaryLine(provider, review) {
+  if (!review) return `- ${provider}: pending`;
+  if (review.error) return `- ${provider}: failed — ${review.error}`;
+  return `- ${provider}: ${review.verdict} (${Math.round(review.confidence * 100)}% confidence)`;
+}
+
 function summaryBody(reviews, gate) {
-  const lines = ['ORES dual-AI review result:'];
-  for (const provider of ['openai', 'claude']) {
-    const review = reviews[provider];
-    if (!review) lines.push(`- ${provider}: pending`);
-    else if (review.error) lines.push(`- ${provider}: failed — ${review.error}`);
-    else lines.push(`- ${provider}: ${review.verdict} (${Math.round(review.confidence * 100)}% confidence)`);
-  }
-  lines.push(`- aggregate gate: ${gate.conclusion ?? gate.status}`);
-  lines.push('', `Head SHA: \`${gate.headSha}\``);
+  const lines = [
+    'ORES dual-AI review result:',
+    ...['openai', 'claude'].map((provider) => providerSummaryLine(provider, reviews[provider])),
+    `- aggregate gate: ${gate.conclusion ?? gate.status}`,
+    '',
+    `Head SHA: \`${gate.headSha}\``,
+  ];
   return lines.join('\n').slice(0, 65_000);
 }
 
@@ -95,14 +99,17 @@ export class ReviewEngine {
     }
   }
 
+  /** The configured dispatch token, or a fresh installation token for the GHA repository. */
+  async #dispatchToken() {
+    if (this.config.gha.dispatchToken) return this.config.gha.dispatchToken;
+    const [dispatchOwner, dispatchRepo] = this.config.gha.repository.split('/');
+    if (!dispatchOwner || !dispatchRepo) throw new Error(`Invalid GHA repository: ${this.config.gha.repository}`);
+    const access = await this.auth.repoToken('actions', dispatchOwner, dispatchRepo, this.config.gha.installationId || null);
+    return access.token;
+  }
+
   async #dispatchOffload(job, pullRequest) {
-    let dispatchToken = this.config.gha.dispatchToken;
-    if (!dispatchToken) {
-      const [dispatchOwner, dispatchRepo] = this.config.gha.repository.split('/');
-      if (!dispatchOwner || !dispatchRepo) throw new Error(`Invalid GHA repository: ${this.config.gha.repository}`);
-      const access = await this.auth.repoToken('actions', dispatchOwner, dispatchRepo, this.config.gha.installationId || null);
-      dispatchToken = access.token;
-    }
+    const dispatchToken = await this.#dispatchToken();
     await dispatchWorkflow(
       this.client,
       dispatchToken,

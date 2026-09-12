@@ -5,8 +5,9 @@ export class Metrics {
   increment(name, labels = {}, amount = 1) {
     const key = metricKey(name, labels);
     const current = this.#counters.get(key) ?? { name, labels, value: 0 };
-    current.value += amount;
-    this.#counters.set(key, current);
+    // The Map is the one stateful store; each entry is replaced by a new value,
+    // never edited in place, so a rendered snapshot can never observe a half-update.
+    this.#counters.set(key, { ...current, value: current.value + amount });
   }
 
   gauge(name, value, labels = {}) {

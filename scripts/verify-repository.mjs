@@ -3,28 +3,32 @@ import { join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 
 const root = new URL('..', import.meta.url).pathname;
-const files = [];
 
+function skipped(entry) {
+  return entry === '.git' || entry === 'node_modules' || entry.endsWith('.sqlite') || entry.includes('.sqlite-');
+}
+
+/** Every file path under `dir`; directories contribute their own listing. */
 async function walk(dir) {
-  for (const entry of await readdir(dir)) {
-    if (entry === '.git' || entry === 'node_modules' || entry.endsWith('.sqlite') || entry.includes('.sqlite-')) continue;
+  const entries = (await readdir(dir)).filter((entry) => !skipped(entry));
+  const listed = await Promise.all(entries.map(async (entry) => {
     const path = join(dir, entry);
     const info = await stat(path);
-    if (info.isDirectory()) await walk(path);
-    else files.push(path);
-  }
+    return info.isDirectory() ? walk(path) : [path];
+  }));
+  return listed.flat();
 }
 
-await walk(root);
-files.sort();
-const hash = createHash('sha256');
-let bytes = 0;
-for (const file of files) {
+const files = (await walk(root)).sort();
+// The hasher is a streaming API and is fed file by file; the byte total is the
+// fold's value, so nothing outside the fold is updated as files are read.
+const { hash, bytes } = await files.reduce(async (pending, file) => {
+  const state = await pending;
   const content = await readFile(file);
-  bytes += content.length;
-  hash.update(relative(root, file));
-  hash.update('\0');
-  hash.update(content);
-  hash.update('\0');
-}
+  state.hash.update(relative(root, file));
+  state.hash.update('\0');
+  state.hash.update(content);
+  state.hash.update('\0');
+  return { hash: state.hash, bytes: state.bytes + content.length };
+}, Promise.resolve({ hash: createHash('sha256'), bytes: 0 }));
 console.log(JSON.stringify({ files: files.length, bytes, content_sha256: hash.digest('hex') }, null, 2));
