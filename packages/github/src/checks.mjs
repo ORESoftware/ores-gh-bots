@@ -120,11 +120,15 @@ export async function completeFailedCheck({ client, token, owner, repo, checkRun
 export async function completeGateCheck({ client, token, owner, repo, checkRunId, gate, detailsUrl }) {
   const providerLines = gate.providerStates.map((item) => `- ${item.provider}: **${item.state}** — ${item.reason}`);
   const ciLines = gate.ciStates.map((item) => `- ${item.context}: **${item.state}** — ${item.reason}`);
+  const projectionLines = (gate.projectionStates ?? [])
+    .map((item) => `- ${item.projectionKind ?? 'invalid'}: **${item.state}** — ${item.reason}`);
   const summary = [
     '## Provider reviews',
     ...providerLines,
     ciLines.length ? '\n## Required CI' : '',
     ...ciLines,
+    projectionLines.length ? '\n## Contract projections' : '',
+    ...projectionLines,
   ].filter(Boolean).join('\n');
 
   const payload = {
@@ -139,9 +143,39 @@ export async function completeGateCheck({ client, token, owner, repo, checkRunId
   if (gate.status === 'completed') {
     payload.conclusion = gate.conclusion;
     payload.completed_at = new Date().toISOString();
-    payload.actions = [{ label: 'Re-evaluate', description: 'Re-evaluate provider and CI results.', identifier: 'regate' }];
+    payload.actions = [{ label: 'Re-evaluate', description: 'Re-evaluate provider, CI, and contract evidence.', identifier: 'regate' }];
   }
   return updateCheckRun(client, token, owner, repo, checkRunId, payload);
+}
+
+export async function completeSupersededGateCheck({
+  client,
+  token,
+  owner,
+  repo,
+  checkRunId,
+  reviewedHeadSha,
+  currentHeadSha,
+  detailsUrl,
+}) {
+  return updateCheckRun(client, token, owner, repo, checkRunId, {
+    name: CHECK_NAMES.gate,
+    status: 'completed',
+    conclusion: 'neutral',
+    completed_at: new Date().toISOString(),
+    details_url: detailsUrl || undefined,
+    output: {
+      title: 'ORES review gate: superseded head',
+      summary: [
+        'The pull-request head changed while exact-head evidence was being evaluated.',
+        '',
+        `Evaluated head: \`${reviewedHeadSha}\``,
+        `Current head: \`${currentHeadSha}\``,
+        '',
+        'All stored contract-admission receipts for the earlier head were invalidated and a new gate job was queued.',
+      ].join('\n').slice(0, 65_535),
+    },
+  });
 }
 
 function normalizeCheckState(check) {

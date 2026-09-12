@@ -1,10 +1,49 @@
-import { CHECK_NAMES, ownerIsAllowed, redactText } from '../../../packages/core/src/index.mjs';
+import {
+  CHECK_NAMES,
+  contractAdmissionPolicyForRepository,
+  ownerIsAllowed,
+  redactText,
+} from '../../../packages/core/src/index.mjs';
 import {
   findLatestCheckRun,
   listAppInstallations,
   listInstallationRepositories,
   listOpenPullRequests,
 } from '../../../packages/github/src/index.mjs';
+
+export function contractAdmissionNeedsRefresh({
+  config,
+  queue,
+  repository,
+  pullRequest,
+  gate,
+  nowMs = Date.now(),
+}) {
+  const policy = contractAdmissionPolicyForRepository(
+    config.contractAdmission?.policy,
+    repository.full_name,
+  );
+  if (!policy || gate?.status !== 'completed') return false;
+  const receipts = queue.getContractAdmissions({
+    owner: repository.owner.login,
+    repo: repository.name,
+    prNumber: pullRequest.number,
+    headSha: pullRequest.head.sha,
+  });
+  const receiptsByKind = new Map(receipts.map((receipt) => [receipt.projectionKind, receipt]));
+  const refreshBefore = nowMs + Math.max(60_000, Number(config.reconciliation.intervalMs));
+  return policy.projections.some((projection) => {
+    const receipt = receiptsByKind.get(projection.kind);
+    if (!receipt) return true;
+    if (receipt.expiresAt <= refreshBefore) return true;
+    if (receipt.producerCheckName !== policy.producer.checkName) return true;
+    if (Number(receipt.producerAppId) !== Number(policy.producer.checkAppId)) return true;
+    if (receipt.result?.repository?.toLowerCase() !== repository.full_name.toLowerCase()) return true;
+    if (receipt.result?.headSha !== pullRequest.head.sha) return true;
+    if (receipt.result?.projectionKind !== projection.kind) return true;
+    return false;
+  });
+}
 
 export class Reconciler {
   constructor({ config, client, auth, queue, logger, metrics }) {
@@ -20,7 +59,14 @@ export class Reconciler {
   async runOnce() {
     if (this.running || !this.config.reconciliation.enabled) return { skipped: true };
     this.running = true;
-    const totals = { installations: 0, repositories: 0, pullRequests: 0, jobs: 0, errors: 0 };
+    const totals = {
+      installations: 0,
+      repositories: 0,
+      pullRequests: 0,
+      jobs: 0,
+      contractRefreshes: 0,
+      errors: 0,
+    };
     try {
       const installations = await listAppInstallations(this.client, this.auth.appJwt('orchestrator'));
       for (const installation of installations) {
@@ -50,8 +96,18 @@ export class Reconciler {
                   findLatestCheckRun(this.client, token, repository.owner.login, repository.name, pr.head.sha, CHECK_NAMES.claude),
                   findLatestCheckRun(this.client, token, repository.owner.login, repository.name, pr.head.sha, CHECK_NAMES.gate),
                 ]);
-                const type = !openai || !claude ? 'review' : !gate ? 'gate' : null;
+                const contractRefresh = contractAdmissionNeedsRefresh({
+                  config: this.config,
+                  queue: this.queue,
+                  repository,
+                  pullRequest: pr,
+                  gate,
+                });
+                const type = !openai || !claude ? 'review' : !gate || contractRefresh ? 'gate' : null;
                 if (!type) continue;
+                const reason = contractRefresh
+                  ? 'reconciler:contract-admission-refresh'
+                  : `reconciler:missing-${type}-check`;
                 const result = this.queue.enqueue({
                   type,
                   installationId: installation.id,
@@ -59,10 +115,13 @@ export class Reconciler {
                   repo: repository.name,
                   prNumber: pr.number,
                   headSha: pr.head.sha,
-                  reason: `reconciler:missing-${type}-check`,
+                  reason,
                   force: true,
                 });
-                if (result.inserted) totals.jobs += 1;
+                if (result.inserted) {
+                  totals.jobs += 1;
+                  if (contractRefresh) totals.contractRefreshes += 1;
+                }
               }
             } catch (error) {
               totals.errors += 1;
@@ -82,6 +141,7 @@ export class Reconciler {
       }
       this.metrics.increment('ores_reconciliations_total', { result: totals.errors ? 'partial' : 'success' });
       this.metrics.gauge('ores_reconciler_repositories', totals.repositories);
+      this.metrics.gauge('ores_reconciler_contract_refreshes', totals.contractRefreshes);
       this.logger.info('reconciliation complete', totals);
       return totals;
     } finally {

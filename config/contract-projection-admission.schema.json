@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/ores-gh-bots/contract-projection-admission.v1.schema.json",
+  "title": "ORES contract projection admission manifest v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "repository",
+    "headSha",
+    "producer",
+    "inputs",
+    "projection",
+    "validation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ores.gh-bots.contract-projection-admission/v1"
+    },
+    "repository": {
+      "$ref": "#/$defs/repository"
+    },
+    "headSha": {
+      "$ref": "#/$defs/gitSha"
+    },
+    "producer": {
+      "type": "object",
+      "required": [
+        "repository",
+        "commit",
+        "reportSha256",
+        "contractIrSha256"
+      ],
+      "properties": {
+        "repository": {
+          "const": "ORESoftware/typespec-json-schema-validator"
+        },
+        "commit": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "reportSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "contractIrSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "additionalProperties": false
+    },
+    "inputs": {
+      "type": "object",
+      "required": [
+        "typespec",
+        "generatedJsonSchema",
+        "authoredJsonSchema"
+      ],
+      "properties": {
+        "typespec": {
+          "$ref": "#/$defs/sha256"
+        },
+        "generatedJsonSchema": {
+          "$ref": "#/$defs/sha256"
+        },
+        "authoredJsonSchema": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "additionalProperties": false
+    },
+    "projection": {
+      "type": "object",
+      "required": [
+        "kind",
+        "outputDigest",
+        "configurationDigest",
+        "lossLedgerDigest",
+        "fieldLockDigest",
+        "operationInventoryDigest",
+        "runtimeValidatorRequired",
+        "runtimeValidatorEvidenceDigest"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "asyncapi",
+            "connect",
+            "dart",
+            "diesel",
+            "drizzle",
+            "fixtures",
+            "gleam",
+            "go",
+            "grpc",
+            "json-rpc",
+            "mocks",
+            "openapi",
+            "openrpc",
+            "protobuf",
+            "seaorm",
+            "serde",
+            "sql",
+            "trpc",
+            "wasm",
+            "wit",
+            "zod"
+          ]
+        },
+        "outputDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "configurationDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "lossLedgerDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "fieldLockDigest": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "operationInventoryDigest": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "runtimeValidatorRequired": {
+          "type": "boolean"
+        },
+        "runtimeValidatorEvidenceDigest": {
+          "$ref": "#/$defs/nullableSha256"
+        }
+      },
+      "additionalProperties": false
+    },
+    "validation": {
+      "type": "object",
+      "required": [
+        "compilerEvidenceDigest",
+        "fixtureEvidenceDigest",
+        "siblingTestRepository",
+        "siblingTestCommit",
+        "siblingTestEvidenceDigest"
+      ],
+      "properties": {
+        "compilerEvidenceDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "fixtureEvidenceDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "siblingTestRepository": {
+          "$ref": "#/$defs/repository"
+        },
+        "siblingTestCommit": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "siblingTestEvidenceDigest": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "nullableSha256": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "gitSha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    }
+  }
+}

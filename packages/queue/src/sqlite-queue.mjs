@@ -12,6 +12,13 @@ function parseJson(value, fallback = null) {
   try { return JSON.parse(value); } catch { return fallback; }
 }
 
+function deepFreeze(value, seen = new WeakSet()) {
+  if (value === null || typeof value !== 'object' || seen.has(value)) return value;
+  seen.add(value);
+  for (const child of Object.values(value)) deepFreeze(child, seen);
+  return Object.freeze(value);
+}
+
 function rowToJob(row) {
   if (!row) return null;
   return {
@@ -38,6 +45,27 @@ function rowToJob(row) {
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
+}
+
+function rowToContractAdmission(row) {
+  if (!row) return null;
+  const result = parseJson(row.result_json, null);
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    throw new Error('Stored contract admission result is invalid');
+  }
+  return Object.freeze({
+    owner: row.owner,
+    repo: row.repo,
+    prNumber: Number(row.pr_number),
+    headSha: row.head_sha,
+    projectionKind: row.projection_kind,
+    result: deepFreeze(result),
+    producerCheckRunId: row.producer_check_run_id === null ? null : Number(row.producer_check_run_id),
+    producerCheckName: row.producer_check_name,
+    producerAppId: row.producer_app_id === null ? null : Number(row.producer_app_id),
+    expiresAt: Number(row.expires_at),
+    updatedAt: Number(row.updated_at),
+  });
 }
 
 function dedupeKey(job) {
@@ -101,6 +129,24 @@ export class SqliteQueue {
         PRIMARY KEY(owner, repo, pr_number, head_sha, provider)
       );
       CREATE INDEX IF NOT EXISTS reviews_sha_idx ON reviews(owner, repo, head_sha);
+      CREATE TABLE IF NOT EXISTS contract_admissions (
+        owner TEXT NOT NULL,
+        repo TEXT NOT NULL,
+        pr_number INTEGER NOT NULL,
+        head_sha TEXT NOT NULL,
+        projection_kind TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        producer_check_run_id INTEGER,
+        producer_check_name TEXT,
+        producer_app_id INTEGER,
+        expires_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY(owner, repo, pr_number, head_sha, projection_kind)
+      );
+      CREATE INDEX IF NOT EXISTS contract_admissions_sha_idx
+        ON contract_admissions(owner, repo, pr_number, head_sha);
+      CREATE INDEX IF NOT EXISTS contract_admissions_expiry_idx
+        ON contract_admissions(expires_at);
     `);
   }
 
@@ -291,15 +337,100 @@ export class SqliteQueue {
     return reviews;
   }
 
+  recordContractAdmission({
+    owner,
+    repo,
+    prNumber,
+    headSha,
+    projectionKind,
+    result,
+    producerCheckRunId = null,
+    producerCheckName = null,
+    producerAppId = null,
+    expiresAt,
+  }) {
+    if (
+      !owner || !repo || !Number.isSafeInteger(Number(prNumber)) || Number(prNumber) < 1 ||
+      !headSha || !projectionKind || !result || typeof result !== 'object' || Array.isArray(result) ||
+      !Number.isSafeInteger(Number(expiresAt)) || Number(expiresAt) < 0
+    ) {
+      throw new Error('Invalid contract admission record');
+    }
+    if (producerCheckRunId !== null && (!Number.isSafeInteger(Number(producerCheckRunId)) || Number(producerCheckRunId) < 1)) {
+      throw new Error('Invalid producer check run id');
+    }
+    if (producerAppId !== null && (!Number.isSafeInteger(Number(producerAppId)) || Number(producerAppId) < 1)) {
+      throw new Error('Invalid producer App id');
+    }
+    const timestamp = nowMs();
+    this.db.prepare(`
+      INSERT INTO contract_admissions(
+        owner, repo, pr_number, head_sha, projection_kind, result_json,
+        producer_check_run_id, producer_check_name, producer_app_id, expires_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(owner, repo, pr_number, head_sha, projection_kind) DO UPDATE SET
+        result_json = excluded.result_json,
+        producer_check_run_id = excluded.producer_check_run_id,
+        producer_check_name = excluded.producer_check_name,
+        producer_app_id = excluded.producer_app_id,
+        expires_at = excluded.expires_at,
+        updated_at = excluded.updated_at
+    `).run(
+      String(owner),
+      String(repo),
+      Number(prNumber),
+      String(headSha),
+      String(projectionKind),
+      JSON.stringify(result),
+      producerCheckRunId === null ? null : Number(producerCheckRunId),
+      producerCheckName === null ? null : String(producerCheckName),
+      producerAppId === null ? null : Number(producerAppId),
+      Number(expiresAt),
+      timestamp,
+    );
+    return this.getContractAdmission({ owner, repo, prNumber, headSha, projectionKind });
+  }
+
+  getContractAdmission({ owner, repo, prNumber, headSha, projectionKind }) {
+    const row = this.db.prepare(`
+      SELECT * FROM contract_admissions
+      WHERE owner = ? AND repo = ? AND pr_number = ? AND head_sha = ? AND projection_kind = ?
+    `).get(owner, repo, prNumber, headSha, projectionKind);
+    return rowToContractAdmission(row);
+  }
+
+  getContractAdmissions({ owner, repo, prNumber, headSha }) {
+    const rows = this.db.prepare(`
+      SELECT * FROM contract_admissions
+      WHERE owner = ? AND repo = ? AND pr_number = ? AND head_sha = ?
+      ORDER BY projection_kind ASC
+    `).all(owner, repo, prNumber, headSha);
+    return Object.freeze(rows.map(rowToContractAdmission));
+  }
+
+  invalidateContractAdmissions({ owner, repo, prNumber, currentHeadSha }) {
+    if (!owner || !repo || !prNumber || !currentHeadSha) {
+      throw new Error('Invalid contract admission invalidation');
+    }
+    return this.db.prepare(`
+      DELETE FROM contract_admissions
+      WHERE owner = ? AND repo = ? AND pr_number = ? AND head_sha <> ?
+    `).run(owner, repo, prNumber, currentHeadSha).changes;
+  }
+
   stats() {
     const rows = this.db.prepare('SELECT status, COUNT(*) AS count FROM jobs GROUP BY status').all();
     return Object.fromEntries(rows.map((row) => [row.status, Number(row.count)]));
   }
 
   prune({ deliveriesBefore = nowMs() - 30 * 24 * 60 * 60_000, completedBefore = nowMs() - 14 * 24 * 60 * 60_000 } = {}) {
+    const timestamp = nowMs();
     const deliveries = this.db.prepare('DELETE FROM deliveries WHERE received_at < ?').run(deliveriesBefore).changes;
     const jobs = this.db.prepare("DELETE FROM jobs WHERE status = 'completed' AND updated_at < ?").run(completedBefore).changes;
-    return { deliveries, jobs };
+    const contractAdmissions = this.db.prepare(`
+      DELETE FROM contract_admissions WHERE expires_at <= ? OR updated_at < ?
+    `).run(timestamp, completedBefore).changes;
+    return { deliveries, jobs, contractAdmissions };
   }
 
   close() {

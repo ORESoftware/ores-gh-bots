@@ -1,0 +1,30 @@
+{
+  "schema": "ores.gh-bots.contract-admission-policy/v1",
+  "repositories": [
+    {
+      "repository": "example-test/widget-api",
+      "enabled": false,
+      "producer": {
+        "repository": "ORESoftware/typespec-json-schema-validator",
+        "allowedCommits": [
+          "1111111111111111111111111111111111111111"
+        ],
+        "checkName": "contract-parity/verify",
+        "checkAppId": 12345,
+        "maxCheckAgeSeconds": 86400
+      },
+      "artifacts": {
+        "reportPath": "contracts/evidence/parity-report.json",
+        "contractIrPath": "contracts/evidence/contract-ir.json",
+        "maxArtifactBytes": 5242880
+      },
+      "projections": [
+        {
+          "kind": "protobuf",
+          "manifestPath": "contracts/evidence/protobuf-admission.json",
+          "requireCompleteScope": true
+        }
+      ]
+    }
+  ]
+}
