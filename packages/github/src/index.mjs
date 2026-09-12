@@ -5,3 +5,4 @@ export * from './checks.mjs';
 export * from './fleet.mjs';
 export * from './rulesets.mjs';
 export * from './actions.mjs';
+export * from './hardening.mjs';

@@ -1,0 +1,60 @@
+name: Fleet hardening
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: plan or apply
+        required: true
+        default: plan
+        type: choice
+        options: [plan, apply]
+      organizations:
+        description: Optional comma-separated organization allowlist
+        required: false
+        type: string
+      include_repositories:
+        description: Write policy markers to every repository
+        required: true
+        default: false
+        type: boolean
+      ensure_repositories:
+        description: Create policy and explicitly required repositories when missing
+        required: true
+        default: false
+        type: boolean
+      confirmation:
+        description: Apply requires HARDEN-<change-ticket>
+        required: false
+        type: string
+  schedule:
+    - cron: '17 7 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet-hardening-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  hardening:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Validate and execute bounded fleet rollout
+        run: node apps/cli/src/hardening.mjs
+        env:
+          GITHUB_ADMIN_TOKEN: ${{ secrets.GITHUB_ADMIN_TOKEN }}
+          HARDENING_ACTION: ${{ github.event_name == 'schedule' && 'plan' || inputs.mode }}
+          HARDENING_ORGANIZATIONS: ${{ inputs.organizations }}
+          HARDENING_INCLUDE_REPOSITORIES: ${{ github.event_name == 'schedule' && 'false' || inputs.include_repositories }}
+          HARDENING_ENSURE_REPOSITORIES: ${{ github.event_name == 'schedule' && 'false' || inputs.ensure_repositories }}
+          HARDENING_CONFIRMATION: ${{ inputs.confirmation }}
+          HARDENING_CONTINUE: 'true'
