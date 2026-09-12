@@ -18,3 +18,5 @@ dist/
 reconcile-report.json
 tmp/
 tmp/worktrees/
+# Local temporary directories and repository-owned worktrees
+temp/
