@@ -1,0 +1,49 @@
+[package]
+org = "oresoftware"
+name = "ores-gh-bots"
+version = "0.1.0"
+description = "GitHub review gates, dependency-graph reconciliation, and contract-admission automation for the ORES fleet"
+language = "typescript"
+
+[package.repository]
+vcs = "git"
+url = "https://github.com/ORESoftware/ores-gh-bots"
+
+# TJSV is a tooling/evidence producer for contract admission. It is not an
+# application schema authority; exact admitted producer commits remain governed
+# by the repository's contract-admission policy and immutable evidence checks.
+[dependencies]
+"oresoftware/typespec-json-schema-validator" = "^0.1.0"
+
+[install]
+dir = ".vendor/.zed"
+
+[targets.repository]
+dir = "."
+adapter = "none"
+
+[targets.node]
+dir = "."
+adapter = "node"
+
+[build]
+command = "npm ci --ignore-scripts && npm run check && npm run verify"
+
+[scripts]
+test = "npm ci --ignore-scripts && npm run check && npm run verify && npm run typecheck"
+
+[publish]
+include_readme = true
+tag_format = "v{version}"
+exclude = [
+  ".env",
+  ".env.*",
+  "env/**",
+  ".vendor/.zed/**",
+  ".zed/**",
+  ".zed-pack/**",
+  "node_modules/**",
+  "coverage/**",
+  "tmp/**",
+  "**/*.log",
+]

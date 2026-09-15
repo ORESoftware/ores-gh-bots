@@ -1,9 +1,9 @@
 name: nightly-pr-reconcile
 
 # GitHub Actions cron is UTC-only, and America/Chicago moves between UTC-6 (CST)
-# and UTC-5 (CDT). Both candidate hours are scheduled and the job itself decides
-# which one is really 1am in Chicago — including on the autumn fall-back date,
-# when 1am happens twice and only the first occurrence is allowed to run.
+# and UTC-5 (CDT). Both candidate hours are scheduled and the CLI itself decides
+# which one is really 1am in Chicago. Each organization gets its own GitHub App
+# installation token; no fleet-wide PAT is accepted.
 on:
   schedule:
     - cron: '0 6 * * *'   # 1am CDT (summer)
@@ -24,49 +24,108 @@ on:
         default: true
 
 concurrency:
-  group: nightly-pr-reconcile
+  group: nightly-pr-reconcile-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  pull-requests: write
-  checks: read
+  contents: read
 
 jobs:
-  reconcile:
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      organizations: ${{ steps.fleet.outputs.organizations }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - name: Check out exact workflow revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          node-version: '22'
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
+          cache: npm
+
+      - name: Build organization matrix
+        id: fleet
+        env:
+          REQUESTED_ORGS: ${{ inputs.org }}
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
+          import { FLEET_ORGS } from './src/config.ts';
+          const requested = (process.env.REQUESTED_ORGS ?? '')
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean);
+          const allowed = new Set(FLEET_ORGS);
+          const selected = requested.length === 0 ? [...FLEET_ORGS] : requested;
+          const unknown = selected.filter((org) => !allowed.has(org));
+          if (unknown.length > 0) {
+            throw new Error(`unknown fleet organizations: ${unknown.join(', ')}`);
+          }
+          const unique = [...new Set(selected)];
+          if (unique.length === 0) throw new Error('organization matrix must not be empty');
+          process.stdout.write(`organizations=${JSON.stringify(unique)}\n`);
+          NODE
+
+  reconcile:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        org: ${{ fromJSON(needs.plan.outputs.organizations) }}
+    steps:
+      - name: Check out exact workflow revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
+          cache: npm
+
+      - name: Mint organization-scoped GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ secrets.ACTIONS_APP_ID }}
+          private-key: ${{ secrets.ACTIONS_APP_PRIVATE_KEY }}
+          owner: ${{ matrix.org }}
 
       - name: Self-test
         run: node --experimental-strip-types --test test/*.test.ts
 
-      - name: Reconcile
+      - name: Reconcile one organization
         env:
-          # A fleet-scoped token: the default GITHUB_TOKEN only reaches this repo.
-          GITHUB_TOKEN: ${{ secrets.FLEET_PR_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           LOG_LEVEL: info
+          EVENT_NAME: ${{ github.event_name }}
+          APPLY_CHANGES: ${{ inputs.apply }}
+          IGNORE_SCHEDULE: ${{ inputs.ignore_schedule }}
+          TARGET_ORG: ${{ matrix.org }}
         run: |
           set -euo pipefail
-          args=()
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            [ "${{ inputs.apply }}" = "true" ] && args+=(--apply) || args+=(--dry-run)
-            [ "${{ inputs.ignore_schedule }}" = "true" ] && args+=(--ignore-schedule)
-            [ -n "${{ inputs.org }}" ] && args+=(--org "${{ inputs.org }}")
+          args=(--org "$TARGET_ORG")
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            [ "$APPLY_CHANGES" = "true" ] && args+=(--apply) || args+=(--dry-run)
+            [ "$IGNORE_SCHEDULE" = "true" ] && args+=(--ignore-schedule)
           else
             args+=(--apply)
           fi
           node --experimental-strip-types src/cli.ts "${args[@]}" | tee reconcile-report.json
 
       - name: Upload report
-        if: always()
-        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: reconcile-report
+          name: reconcile-report-${{ matrix.org }}
           path: reconcile-report.json
           retention-days: 30
+          if-no-files-found: warn
