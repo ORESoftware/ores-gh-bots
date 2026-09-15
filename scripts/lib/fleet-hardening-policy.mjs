@@ -105,7 +105,11 @@ export function validateFleetHardeningDocuments({ policy, schema }) {
 }
 
 export async function loadFleetHardeningDocuments(root) {
-  const policy = JSON.parse(await readFile(join(root, 'config/hardening-fleet.v1.json'), 'utf8'));
+  // Keep the immutable cross-fleet contract separate from the large operational
+  // organization inventory in config/hardening-fleet.v1.json. The operational
+  // inventory is consumed by the hardening CLI and validated by its own
+  // hardening-fleet.schema.json model; this pair is the small public contract.
+  const policy = JSON.parse(await readFile(join(root, 'config/hardening-fleet.contract.v1.json'), 'utf8'));
   const schema = JSON.parse(await readFile(join(root, 'config/hardening-fleet.v1.schema.json'), 'utf8'));
   return { policy, schema };
 }
