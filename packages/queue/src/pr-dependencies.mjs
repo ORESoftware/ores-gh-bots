@@ -103,6 +103,16 @@ function selectAcyclicEdges(baseGraph, dependentKey, edges) {
   }, Object.freeze({ graph: baseGraph, accepted: Object.freeze([]), ignored: Object.freeze([]) }));
 }
 
+export function clearPullRequestDependencies(queue, { owner, repo, prNumber }) {
+  pullRequestDependencyKey(owner, repo, prNumber);
+  const db = database(queue);
+  const result = db.prepare(`
+    DELETE FROM pr_dependencies
+    WHERE dependent_owner = ? AND dependent_repo = ? AND dependent_pr_number = ?
+  `).run(String(owner).toLowerCase(), String(repo).toLowerCase(), Number(prNumber));
+  return Object.freeze({ removed: Number(result.changes) });
+}
+
 export function replacePullRequestDependencies(queue, {
   dependentOwner,
   dependentRepo,
@@ -177,6 +187,8 @@ function upstreamCoordinates(event, payload) {
     };
   }
   if (event === 'check_run') {
+    if (!['created', 'rerequested', 'completed'].includes(String(payload?.action ?? ''))) return null;
+    if (payload?.check_run?.name !== 'ores-review/gate') return null;
     const ref = payload?.check_run?.pull_requests?.[0];
     if (ref?.number) {
       return {
