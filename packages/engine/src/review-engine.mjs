@@ -87,13 +87,13 @@ export class ReviewEngine {
     return { access, pullRequest };
   }
 
-  #enqueueCurrent(job, pullRequest, type = job.type) {
+  #enqueueCurrent(job, pullRequest, type = job.type, force = false) {
     return this.queue.enqueue({
       ...job,
       id: undefined,
       type,
       headSha: pullRequest.head.sha,
-      force: false,
+      force,
       needsAuthorization: false,
       reason: `${job.reason}:head-moved`,
     });
@@ -215,7 +215,7 @@ export class ReviewEngine {
     }
   }
 
-  async #dependencyStates(job, pullRequest) {
+  async #dependencyEvidence(job, pullRequest) {
     let declarations;
     try {
       declarations = parsePullRequestDependencies(pullRequest.body, { owner: job.owner, repo: job.repo });
@@ -228,11 +228,15 @@ export class ReviewEngine {
         dependentInstallationId: job.installationId,
         declarations: [],
       });
-      return Object.freeze([Object.freeze({
-        dependency: null,
-        state: 'failure',
-        reason: `invalid dependency declaration: ${errorSummary(error)}`,
-      })]);
+      return Object.freeze({
+        dependencies: Object.freeze([]),
+        ignoredCycles: Object.freeze([]),
+        states: Object.freeze([Object.freeze({
+          dependency: null,
+          state: 'failure',
+          reason: `invalid dependency declaration: ${errorSummary(error)}`,
+        })]),
+      });
     }
 
     const selected = replacePullRequestDependencies(this.queue, {
@@ -249,13 +253,17 @@ export class ReviewEngine {
       gateAppId: this.config.apps.gate.id,
       dependencies: selected.accepted,
     });
-    const ignoredCycles = selected.ignored.map((edge) => Object.freeze({
+    const ignoredCycles = Object.freeze(selected.ignored.map((edge) => Object.freeze({
       dependency: pullRequestDependencyKey(edge.dependencyOwner, edge.dependencyRepo, edge.dependencyPrNumber),
       state: 'success',
       reason: 'dependency cycle detected; edge ignored by policy',
       ignored: true,
-    }));
-    return Object.freeze([...verified, ...ignoredCycles]);
+    })));
+    return Object.freeze({
+      dependencies: selected.accepted,
+      ignoredCycles,
+      states: Object.freeze([...verified, ...ignoredCycles]),
+    });
   }
 
   async review(job) {
@@ -345,8 +353,8 @@ export class ReviewEngine {
       pullRequest,
       nowMs: this.now(),
     });
-    const dependencyStates = await this.#dependencyStates(job, pullRequest);
-    const evaluated = evaluateGate({
+    const dependencyEvidence = await this.#dependencyEvidence(job, pullRequest);
+    const gateInputs = {
       reviews,
       ci,
       requiredCiContexts: this.config.review.requiredCiContexts,
@@ -356,8 +364,8 @@ export class ReviewEngine {
       projectionContext: contractAdmission.requiredProjectionKinds.length
         ? { repository: `${job.owner}/${job.repo}`, headSha: pullRequest.head.sha }
         : null,
-      dependencyStates,
-    });
+    };
+    let evaluated = evaluateGate({ ...gateInputs, dependencyStates: dependencyEvidence.states });
 
     const latest = await getPullRequest(
       this.client,
@@ -390,6 +398,31 @@ export class ReviewEngine {
         evaluatedHeadSha: pullRequest.head.sha,
         currentHeadSha: latest.head.sha,
       };
+    }
+
+    if (String(latest.body ?? '') !== String(pullRequest.body ?? '')) {
+      this.#enqueueCurrent(job, latest, 'gate', true);
+      this.metrics?.increment('ores_stale_gate_evaluations_total', { reason: 'pr-body-moved' });
+      return {
+        skipped: 'dependency-declarations-changed-during-gate',
+        headSha: pullRequest.head.sha,
+      };
+    }
+
+    if (evaluated.status === 'completed' && evaluated.conclusion === 'success' && dependencyEvidence.dependencies.length > 0) {
+      const finalDependencies = await evaluatePullRequestDependencies({
+        client: this.client,
+        auth: this.auth,
+        gateAppId: this.config.apps.gate.id,
+        dependencies: dependencyEvidence.dependencies,
+      });
+      evaluated = evaluateGate({
+        ...gateInputs,
+        dependencyStates: [...finalDependencies, ...dependencyEvidence.ignoredCycles],
+      });
+      this.metrics?.increment('ores_pr_dependency_revalidations_total', {
+        conclusion: evaluated.conclusion ?? 'pending',
+      });
     }
 
     const gate = { ...evaluated, headSha: pullRequest.head.sha };
