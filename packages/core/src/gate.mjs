@@ -2,6 +2,7 @@ import {
   CONTRACT_PROJECTION_ADMISSION_VERIFICATION_SCHEMA,
   isLocallyVerifiedContractProjectionAdmission,
 } from './contract-admission.mjs';
+import { normalizeDependencyGateStates } from './pr-dependencies.mjs';
 
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const HEX_160 = /^[a-f0-9]{40}$/u;
@@ -73,6 +74,7 @@ export function evaluateGate({
   projectionAdmissions = [],
   requiredProjectionKinds = [],
   projectionContext = null,
+  dependencyStates = [],
 }) {
   const providerStates = ['openai', 'claude'].map((provider) => {
     const review = reviews?.[provider] ?? null;
@@ -127,12 +129,19 @@ export function evaluateGate({
     return evaluateProjectionAdmission(kind, admissionsByKind.get(kind) ?? [], projectionContext);
   });
 
-  const all = [...providerStates, ...ciStates, ...projectionStates];
+  const normalizedDependencyStates = normalizeDependencyGateStates(dependencyStates);
+  const all = [...providerStates, ...ciStates, ...projectionStates, ...normalizedDependencyStates];
+  const result = {
+    providerStates,
+    ciStates,
+    projectionStates,
+    dependencyStates: normalizedDependencyStates,
+  };
   if (all.some((item) => item.state === 'failure')) {
-    return { status: 'completed', conclusion: 'failure', providerStates, ciStates, projectionStates };
+    return { status: 'completed', conclusion: 'failure', ...result };
   }
   if (all.some((item) => item.state === 'pending')) {
-    return { status: 'in_progress', conclusion: null, providerStates, ciStates, projectionStates };
+    return { status: 'in_progress', conclusion: null, ...result };
   }
-  return { status: 'completed', conclusion: 'success', providerStates, ciStates, projectionStates };
+  return { status: 'completed', conclusion: 'success', ...result };
 }
