@@ -1,5 +1,7 @@
 import { pullRequestDependencyKey } from '../../core/src/pr-dependencies.mjs';
 
+const GATE_EXTERNAL_ID = /^gate:([^/]+)\/([^#]+)#([1-9]\d*)@([a-f0-9]{40})$/iu;
+
 function database(queue) {
   if (!queue?.db || typeof queue.db.exec !== 'function') throw new Error('PR dependency store requires the SQLite queue');
   queue.db.exec(`
@@ -178,7 +180,26 @@ export function replacePullRequestDependencies(queue, {
   }
 }
 
-function upstreamCoordinates(event, payload) {
+function gateCoordinates(payload, expectedGateAppId) {
+  if (!['created', 'rerequested', 'completed'].includes(String(payload?.action ?? ''))) return null;
+  const check = payload?.check_run;
+  if (check?.name !== 'ores-review/gate') return null;
+  if (expectedGateAppId !== null && expectedGateAppId !== undefined && Number(check?.app?.id) !== Number(expectedGateAppId)) {
+    return null;
+  }
+
+  const repositoryOwner = String(payload.repository?.owner?.login ?? '').toLowerCase();
+  const repositoryName = String(payload.repository?.name ?? '').toLowerCase();
+  const externalId = String(check?.external_id ?? '');
+  const match = GATE_EXTERNAL_ID.exec(externalId);
+  if (!match) return null;
+  const [, owner, repo, rawPrNumber, headSha] = match;
+  if (owner.toLowerCase() !== repositoryOwner || repo.toLowerCase() !== repositoryName) return null;
+  if (String(check?.head_sha ?? '').toLowerCase() !== headSha.toLowerCase()) return null;
+  return { owner: repositoryOwner, repo: repositoryName, prNumber: Number(rawPrNumber) };
+}
+
+function upstreamCoordinates(event, payload, expectedGateAppId) {
   if (event === 'pull_request' && payload?.pull_request?.number) {
     return {
       owner: payload.repository?.owner?.login,
@@ -186,23 +207,12 @@ function upstreamCoordinates(event, payload) {
       prNumber: payload.pull_request.number,
     };
   }
-  if (event === 'check_run') {
-    if (!['created', 'rerequested', 'completed'].includes(String(payload?.action ?? ''))) return null;
-    if (payload?.check_run?.name !== 'ores-review/gate') return null;
-    const ref = payload?.check_run?.pull_requests?.[0];
-    if (ref?.number) {
-      return {
-        owner: payload.repository?.owner?.login,
-        repo: payload.repository?.name,
-        prNumber: ref.number,
-      };
-    }
-  }
+  if (event === 'check_run') return gateCoordinates(payload, expectedGateAppId);
   return null;
 }
 
-export function dependentGateJobsForWebhook(queue, { event, payload }) {
-  const upstream = upstreamCoordinates(event, payload);
+export function dependentGateJobsForWebhook(queue, { event, payload, expectedGateAppId = null }) {
+  const upstream = upstreamCoordinates(event, payload, expectedGateAppId);
   if (!upstream?.owner || !upstream.repo || !upstream.prNumber) return [];
   const db = database(queue);
   const rows = db.prepare(`
