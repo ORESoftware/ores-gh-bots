@@ -125,10 +125,25 @@ test('self dependency is ignored instead of blocking the gate', () => {
   }
 });
 
-function fakeDependencyClient({ version = '1.2.3', gateStatus = 'completed', gateConclusion = 'success', gateAppId = 44 } = {}) {
+function fakeDependencyClient({
+  version = '1.2.3',
+  gateStatus = 'completed',
+  gateConclusion = 'success',
+  gateAppId = 44,
+  gateName = 'ores-review/gate',
+  gateHeadSha = SHA_A,
+  baseFullName = 'Other/Library',
+  errorStatus = null,
+  manifestText = null,
+} = {}) {
   return {
     async request(method, path) {
       assert.equal(method, 'GET');
+      if (errorStatus !== null) {
+        const error = new Error('untrusted upstream transport detail');
+        error.status = errorStatus;
+        throw error;
+      }
       if (path.includes('/pulls/42')) {
         return {
           data: {
@@ -137,7 +152,7 @@ function fakeDependencyClient({ version = '1.2.3', gateStatus = 'completed', gat
             merged: false,
             merged_at: null,
             head: { sha: SHA_A },
-            base: { repo: { full_name: 'Other/Library' } },
+            base: { repo: { full_name: baseFullName } },
           },
         };
       }
@@ -146,7 +161,8 @@ function fakeDependencyClient({ version = '1.2.3', gateStatus = 'completed', gat
           data: {
             check_runs: [{
               id: 99,
-              name: 'ores-review/gate',
+              name: gateName,
+              head_sha: gateHeadSha,
               external_id: `gate:Other/Library#42@${SHA_A}`,
               status: gateStatus,
               conclusion: gateConclusion,
@@ -160,7 +176,7 @@ function fakeDependencyClient({ version = '1.2.3', gateStatus = 'completed', gat
           data: {
             type: 'file',
             encoding: 'base64',
-            content: Buffer.from(`[package]\norg = "other"\nname = "library"\nversion = "${version}"\n`).toString('base64'),
+            content: Buffer.from(manifestText ?? `[package]\norg = "other"\nname = "library"\nversion = "${version}"\n`).toString('base64'),
           },
         };
       }
@@ -303,6 +319,217 @@ test('only trusted exact ORES gate check events trigger reverse dependency re-ga
     assert.equal(gate.length, 1);
     assert.equal(gate[0].type, 'gate');
     assert.equal(gate[0].prNumber, 1);
+  } finally {
+    queue.close();
+  }
+});
+
+
+test('normalizes persisted dependency coordinates, head SHA, and version evidence', () => {
+  const queue = new SqliteQueue({ path: ':memory:' });
+  try {
+    const result = replacePullRequestDependencies(queue, edge({
+      owner: ' Org ',
+      repo: ' Repo-A ',
+      headSha: SHA_A.toUpperCase(),
+      dependencies: [{ owner: ' Other ', repo: ' Library ', prNumber: 42, expectedVersion: 'v1.2.3' }],
+    }));
+    assert.equal(result.accepted[0].dependentOwner, 'org');
+    assert.equal(result.accepted[0].dependentRepo, 'repo-a');
+    assert.equal(result.accepted[0].dependentHeadSha, SHA_A);
+    assert.equal(result.accepted[0].dependencyOwner, 'other');
+    assert.equal(result.accepted[0].dependencyRepo, 'library');
+    assert.equal(result.accepted[0].expectedVersion, '1.2.3');
+  } finally {
+    queue.close();
+  }
+});
+
+test('deduplicates equivalent programmatic dependency declarations before persistence', () => {
+  const queue = new SqliteQueue({ path: ':memory:' });
+  try {
+    const result = replacePullRequestDependencies(queue, edge({
+      dependencies: [
+        { owner: 'Other', repo: 'Library', prNumber: 42, expectedVersion: 'v1.2.3' },
+        { owner: ' other ', repo: ' library ', prNumber: 42, expectedVersion: '1.2.3' },
+      ],
+    }));
+    assert.equal(result.accepted.length, 1);
+    assert.equal(result.count, 1);
+  } finally {
+    queue.close();
+  }
+});
+
+test('rejects conflicting programmatic dependency versions before opening a transaction', () => {
+  const queue = new SqliteQueue({ path: ':memory:' });
+  try {
+    assert.throws(() => replacePullRequestDependencies(queue, edge({
+      dependencies: [
+        { owner: 'Other', repo: 'Library', prNumber: 42, expectedVersion: '1.2.3' },
+        { owner: 'Other', repo: 'Library', prNumber: 42, expectedVersion: '1.2.4' },
+      ],
+    })), /Conflicting version requirements/u);
+  } finally {
+    queue.close();
+  }
+});
+
+test('orders programmatic dependency edges deterministically before cycle selection', () => {
+  const queue = new SqliteQueue({ path: ':memory:' });
+  try {
+    const result = replacePullRequestDependencies(queue, edge({
+      dependencies: [
+        { owner: 'zeta', repo: 'pkg', prNumber: 9, expectedVersion: null },
+        { owner: 'alpha', repo: 'pkg', prNumber: 2, expectedVersion: null },
+      ],
+    }));
+    assert.deepEqual(result.accepted.map((item) => [item.dependencyOwner, item.dependencyPrNumber]), [
+      ['alpha', 2],
+      ['zeta', 9],
+    ]);
+  } finally {
+    queue.close();
+  }
+});
+
+test('fails closed before network access when the trusted Gate App id is missing', async () => {
+  const client = { async request() { assert.fail('network must not be touched'); } };
+  const result = await evaluatePullRequestDependency({
+    client,
+    auth,
+    gateAppId: null,
+    dependency: { owner: 'other', repo: 'library', prNumber: 42, expectedVersion: null },
+  });
+  assert.equal(result.state, 'failure');
+  assert.match(result.reason, /gate App identity is not configured/u);
+});
+
+test('does not trust an exact external id attached to the wrong check head', async () => {
+  const result = await evaluatePullRequestDependency({
+    client: fakeDependencyClient({ gateHeadSha: SHA_B }),
+    auth,
+    gateAppId: 44,
+    dependency: { owner: 'other', repo: 'library', prNumber: 42, expectedVersion: null },
+  });
+  assert.equal(result.state, 'pending');
+  assert.match(result.reason, /gate is missing/u);
+});
+
+test('does not trust a foreign check name even when external id and App id match', async () => {
+  const result = await evaluatePullRequestDependency({
+    client: fakeDependencyClient({ gateName: 'build' }),
+    auth,
+    gateAppId: 44,
+    dependency: { owner: 'other', repo: 'library', prNumber: 42, expectedVersion: null },
+  });
+  assert.equal(result.state, 'pending');
+  assert.match(result.reason, /gate is missing/u);
+});
+
+test('fails closed when GitHub returns a PR from a different base repository', async () => {
+  const result = await evaluatePullRequestDependency({
+    client: fakeDependencyClient({ baseFullName: 'Other/Different' }),
+    auth,
+    gateAppId: 44,
+    dependency: { owner: 'other', repo: 'library', prNumber: 42, expectedVersion: null },
+  });
+  assert.equal(result.state, 'failure');
+  assert.match(result.reason, /base repository does not match/u);
+});
+
+test('repository identity comparison remains case-insensitive', async () => {
+  const result = await evaluatePullRequestDependency({
+    client: fakeDependencyClient({ baseFullName: 'OTHER/LIBRARY' }),
+    auth,
+    gateAppId: 44,
+    dependency: { owner: 'other', repo: 'library', prNumber: 42, expectedVersion: null },
+  });
+  assert.equal(result.state, 'success');
+});
+
+test('sanitizes 401 dependency-read failures', async () => {
+  const result = await evaluatePullRequestDependency({
+    client: fakeDependencyClient({ errorStatus: 401 }),
+    auth,
+    gateAppId: 44,
+    dependency: { owner: 'other', repo: 'library', prNumber: 42, expectedVersion: null },
+  });
+  assert.equal(result.state, 'failure');
+  assert.match(result.reason, /Orchestrator App installation/u);
+  assert.doesNotMatch(result.reason, /untrusted upstream/u);
+});
+
+test('classifies dependency verification rate limits without leaking transport details', async () => {
+  const result = await evaluatePullRequestDependency({
+    client: fakeDependencyClient({ errorStatus: 429 }),
+    auth,
+    gateAppId: 44,
+    dependency: { owner: 'other', repo: 'library', prNumber: 42, expectedVersion: null },
+  });
+  assert.equal(result.state, 'failure');
+  assert.match(result.reason, /rate-limited/u);
+  assert.doesNotMatch(result.reason, /untrusted upstream/u);
+});
+
+test('classifies GitHub 5xx dependency failures as temporary upstream unavailability', async () => {
+  const result = await evaluatePullRequestDependency({
+    client: fakeDependencyClient({ errorStatus: 503 }),
+    auth,
+    gateAppId: 44,
+    dependency: { owner: 'other', repo: 'library', prNumber: 42, expectedVersion: null },
+  });
+  assert.equal(result.state, 'failure');
+  assert.match(result.reason, /temporarily unavailable/u);
+});
+
+test('fails closed on oversized exact-head version manifests', async () => {
+  const manifestText = `[package]\nversion = "1.2.3"\n#${'x'.repeat((256 * 1024) + 1)}`;
+  const result = await evaluatePullRequestDependency({
+    client: fakeDependencyClient({ manifestText }),
+    auth,
+    gateAppId: 44,
+    dependency: { owner: 'other', repo: 'library', prNumber: 42, expectedVersion: '1.2.3' },
+  });
+  assert.equal(result.state, 'failure');
+  assert.equal(result.reason, 'upstream dependency verification failed closed');
+});
+
+test('reverse dependency propagation uses normalized persisted coordinates', () => {
+  const queue = new SqliteQueue({ path: ':memory:' });
+  try {
+    replacePullRequestDependencies(queue, edge({
+      owner: ' Org ',
+      repo: ' App ',
+      dependencies: [{ owner: ' Other ', repo: ' Library ', prNumber: 42, expectedVersion: null }],
+    }));
+    const jobs = dependentGateJobsForWebhook(queue, {
+      event: 'pull_request',
+      payload: {
+        action: 'synchronize',
+        repository: { owner: { login: 'OTHER' }, name: 'LIBRARY' },
+        pull_request: { number: 42 },
+      },
+    });
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0].owner, 'org');
+    assert.equal(jobs[0].repo, 'app');
+  } finally {
+    queue.close();
+  }
+});
+
+test('self dependency remains ignored after persistence-boundary normalization', () => {
+  const queue = new SqliteQueue({ path: ':memory:' });
+  try {
+    const result = replacePullRequestDependencies(queue, edge({
+      owner: ' Org ',
+      repo: ' App ',
+      dependencies: [{ owner: 'org', repo: 'app', prNumber: 1, expectedVersion: null }],
+    }));
+    assert.equal(result.accepted.length, 0);
+    assert.equal(result.ignored.length, 1);
+    assert.equal(result.ignored[0].reason, 'cycle');
   } finally {
     queue.close();
   }
