@@ -163,7 +163,7 @@ function fakeDependencyClient({
               id: 99,
               name: gateName,
               head_sha: gateHeadSha,
-              external_id: `gate:Other/Library#42@${SHA_A}`,
+              external_id: `gate:${baseFullName}#42@${SHA_A}`,
               status: gateStatus,
               conclusion: gateConclusion,
               app: { id: gateAppId },
