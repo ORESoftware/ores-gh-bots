@@ -7,3 +7,4 @@ export * from './rulesets.mjs';
 export * from './actions.mjs';
 export * from './hardening.mjs';
 export * from './contract-artifacts.mjs';
+export * from './pr-dependencies.mjs';
