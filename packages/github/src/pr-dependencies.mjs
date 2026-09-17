@@ -58,7 +58,7 @@ function tomlVersion(text, section = null) {
 }
 
 function manifestVersion(path, text) {
-  if (path === '.zpkg.toml') return tomlVersion(text);
+  if (path === '.zpkg.toml') return tomlVersion(text, 'package') ?? tomlVersion(text);
   if (path === 'package.json') {
     try {
       const parsed = JSON.parse(text);
@@ -205,7 +205,9 @@ export async function evaluatePullRequestDependency({ client, auth, gateAppId, d
     const status = githubStatus(error);
     const reason = status === 404
       ? 'upstream PR or repository is inaccessible or missing'
-      : `upstream dependency verification error: ${error instanceof Error ? error.message : String(error)}`;
+      : status === 403
+        ? 'upstream dependency is inaccessible; verify the Orchestrator App installation and Contents: read approval'
+        : `upstream dependency verification error: ${error instanceof Error ? error.message : String(error)}`;
     return Object.freeze({ dependency: coordinates.key, state: 'failure', reason });
   }
 }
