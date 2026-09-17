@@ -160,7 +160,7 @@ function fakeDependencyClient({ version = '1.2.3', gateStatus = 'completed', gat
           data: {
             type: 'file',
             encoding: 'base64',
-            content: Buffer.from(`org = "other"\nname = "library"\nversion = "${version}"\n`).toString('base64'),
+            content: Buffer.from(`[package]\norg = "other"\nname = "library"\nversion = "${version}"\n`).toString('base64'),
           },
         };
       }
@@ -180,7 +180,7 @@ const auth = {
   },
 };
 
-test('requires trusted exact-head upstream gate and exact manifest version', async () => {
+test('requires trusted exact-head upstream gate and exact zpkg package version', async () => {
   const result = await evaluatePullRequestDependency({
     client: fakeDependencyClient(),
     auth,
@@ -243,7 +243,21 @@ test('aggregate gate includes dependency state and lets ignored cycles pass', ()
   assert.equal(fail.conclusion, 'failure');
 });
 
-test('only upstream ORES gate check events trigger reverse dependency re-gating', () => {
+function gateWebhook({ appId = 44, externalId = `gate:Org/b#2@${SHA_B}`, headSha = SHA_B } = {}) {
+  return {
+    action: 'completed',
+    repository: { owner: { login: 'Org' }, name: 'b' },
+    check_run: {
+      name: 'ores-review/gate',
+      external_id: externalId,
+      head_sha: headSha,
+      app: { id: appId },
+      pull_requests: [],
+    },
+  };
+}
+
+test('only trusted exact ORES gate check events trigger reverse dependency re-gating', () => {
   const queue = new SqliteQueue({ path: ':memory:' });
   try {
     replacePullRequestDependencies(queue, edge({
@@ -255,24 +269,40 @@ test('only upstream ORES gate check events trigger reverse dependency re-gating'
 
     const ordinaryCi = dependentGateJobsForWebhook(queue, {
       event: 'check_run',
-      payload: {
-        action: 'completed',
-        repository: { owner: { login: 'Org' }, name: 'b' },
-        check_run: { name: 'build', pull_requests: [{ number: 2 }] },
-      },
+      expectedGateAppId: 44,
+      payload: { ...gateWebhook(), check_run: { ...gateWebhook().check_run, name: 'build' } },
     });
     assert.deepEqual(ordinaryCi, []);
 
+    const foreignGate = dependentGateJobsForWebhook(queue, {
+      event: 'check_run',
+      expectedGateAppId: 44,
+      payload: gateWebhook({ appId: 999 }),
+    });
+    assert.deepEqual(foreignGate, []);
+
+    const malformedGate = dependentGateJobsForWebhook(queue, {
+      event: 'check_run',
+      expectedGateAppId: 44,
+      payload: gateWebhook({ externalId: `gate:Other/b#2@${SHA_B}` }),
+    });
+    assert.deepEqual(malformedGate, []);
+
+    const wrongHeadGate = dependentGateJobsForWebhook(queue, {
+      event: 'check_run',
+      expectedGateAppId: 44,
+      payload: gateWebhook({ headSha: SHA_A }),
+    });
+    assert.deepEqual(wrongHeadGate, []);
+
     const gate = dependentGateJobsForWebhook(queue, {
       event: 'check_run',
-      payload: {
-        action: 'completed',
-        repository: { owner: { login: 'Org' }, name: 'b' },
-        check_run: { name: 'ores-review/gate', pull_requests: [{ number: 2 }] },
-      },
+      expectedGateAppId: 44,
+      payload: gateWebhook(),
     });
     assert.equal(gate.length, 1);
     assert.equal(gate[0].type, 'gate');
+    assert.equal(gate[0].prNumber, 1);
   } finally {
     queue.close();
   }
