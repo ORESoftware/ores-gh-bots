@@ -2,6 +2,8 @@ import {
   CHECK_NAMES,
   createLogger,
   evaluateGate,
+  parsePullRequestDependencies,
+  pullRequestDependencyKey,
   redactText,
 } from '../../core/src/index.mjs';
 import {
@@ -12,12 +14,14 @@ import {
   createPullRequestReview,
   dispatchWorkflow,
   ensureInProgressCheck,
+  evaluatePullRequestDependencies,
   getCiSnapshot,
   getCollaboratorPermission,
   getPullRequest,
   listPullRequestFiles,
   permissionCanTriggerReview,
 } from '../../github/src/index.mjs';
+import { replacePullRequestDependencies } from '../../queue/src/index.mjs';
 import { reviewWithAnthropic, reviewWithOpenAI } from '../../providers/src/index.mjs';
 import { buildReviewContext } from './context.mjs';
 import { loadContractProjectionAdmissions } from './contract-admission-loader.mjs';
@@ -43,6 +47,9 @@ function summaryBody(reviews, gate) {
   }
   for (const projection of gate.projectionStates ?? []) {
     lines.push(`- contract ${projection.projectionKind ?? 'invalid'}: ${projection.state} — ${projection.reason}`);
+  }
+  for (const dependency of gate.dependencyStates ?? []) {
+    lines.push(`- dependency ${dependency.dependency ?? 'invalid'}: ${dependency.state} — ${dependency.reason}`);
   }
   lines.push(`- aggregate gate: ${gate.conclusion ?? gate.status}`);
   lines.push('', `Head SHA: \`${gate.headSha}\``);
@@ -208,6 +215,49 @@ export class ReviewEngine {
     }
   }
 
+  async #dependencyStates(job, pullRequest) {
+    let declarations;
+    try {
+      declarations = parsePullRequestDependencies(pullRequest.body, { owner: job.owner, repo: job.repo });
+    } catch (error) {
+      replacePullRequestDependencies(this.queue, {
+        dependentOwner: job.owner,
+        dependentRepo: job.repo,
+        dependentPrNumber: job.prNumber,
+        dependentHeadSha: pullRequest.head.sha,
+        dependentInstallationId: job.installationId,
+        declarations: [],
+      });
+      return Object.freeze([Object.freeze({
+        dependency: null,
+        state: 'failure',
+        reason: `invalid dependency declaration: ${errorSummary(error)}`,
+      })]);
+    }
+
+    const selected = replacePullRequestDependencies(this.queue, {
+      dependentOwner: job.owner,
+      dependentRepo: job.repo,
+      dependentPrNumber: job.prNumber,
+      dependentHeadSha: pullRequest.head.sha,
+      dependentInstallationId: job.installationId,
+      declarations,
+    });
+    const verified = await evaluatePullRequestDependencies({
+      client: this.client,
+      auth: this.auth,
+      gateAppId: this.config.apps.gate.id,
+      dependencies: selected.accepted,
+    });
+    const ignoredCycles = selected.ignored.map((edge) => Object.freeze({
+      dependency: pullRequestDependencyKey(edge.dependencyOwner, edge.dependencyRepo, edge.dependencyPrNumber),
+      state: 'success',
+      reason: 'dependency cycle detected; edge ignored by policy',
+      ignored: true,
+    }));
+    return Object.freeze([...verified, ...ignoredCycles]);
+  }
+
   async review(job) {
     const { access, pullRequest } = await this.#loadCurrentPullRequest(job);
     if (!(await this.#authorizeCommand(job, access.token))) {
@@ -274,7 +324,7 @@ export class ReviewEngine {
       name: CHECK_NAMES.gate,
       detailsUrl: url,
       externalId: `gate:${job.owner}/${job.repo}#${job.prNumber}@${pullRequest.head.sha}`,
-      summary: 'Waiting for exact-SHA AI reviews, configured CI, and trusted Contract IR projection evidence.',
+      summary: 'Waiting for exact-SHA AI reviews, configured CI, trusted Contract IR projection evidence, and PR dependencies.',
     });
     const reviews = this.queue.getReviews({
       owner: job.owner,
@@ -295,6 +345,7 @@ export class ReviewEngine {
       pullRequest,
       nowMs: this.now(),
     });
+    const dependencyStates = await this.#dependencyStates(job, pullRequest);
     const evaluated = evaluateGate({
       reviews,
       ci,
@@ -305,6 +356,7 @@ export class ReviewEngine {
       projectionContext: contractAdmission.requiredProjectionKinds.length
         ? { repository: `${job.owner}/${job.repo}`, headSha: pullRequest.head.sha }
         : null,
+      dependencyStates,
     });
 
     const latest = await getPullRequest(
@@ -358,6 +410,12 @@ export class ReviewEngine {
       this.metrics?.increment('ores_contract_admission_evaluations_total', {
         kind: projection.projectionKind ?? 'invalid',
         state: projection.state,
+      });
+    }
+    for (const dependency of gate.dependencyStates ?? []) {
+      this.metrics?.increment('ores_pr_dependency_evaluations_total', {
+        state: dependency.state,
+        ignored: dependency.ignored ? 'true' : 'false',
       });
     }
 
