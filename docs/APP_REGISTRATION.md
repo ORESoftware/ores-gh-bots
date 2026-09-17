@@ -4,7 +4,7 @@ ORES uses four mandatory runtime identities plus a separately restricted Actions
 
 | Role | Visibility | Installation | Exact repository permissions | Webhook events |
 |---|---|---|---|---|
-| Orchestrator | Public, not Marketplace-listed | Every managed organization | Checks: read; Issues: read; Metadata: read; Pull requests: write; Commit statuses: read | `check_run`, `installation`, `installation_repositories`, `issue_comment`, `pull_request` |
+| Orchestrator | Public, not Marketplace-listed | Every managed organization | Checks: read; Contents: read; Issues: read; Metadata: read; Pull requests: write; Commit statuses: read | `check_run`, `installation`, `installation_repositories`, `issue_comment`, `pull_request` |
 | OpenAI reviewer | Public, not Marketplace-listed | Every managed organization | Checks: write; Metadata: read | None |
 | Claude reviewer | Public, not Marketplace-listed | Every managed organization | Checks: write; Metadata: read | None |
 | Review gate | Public, not Marketplace-listed | Every managed organization | Checks: write; Metadata: read | None |
@@ -12,7 +12,7 @@ ORES uses four mandatory runtime identities plus a separately restricted Actions
 
 A private GitHub App can only be installed on the account that owns it. The four fleet Apps are therefore public so they can be installed across the separate ORES organizations. Public visibility does **not** list an App in GitHub Marketplace; do not submit these Apps for Marketplace publication.
 
-`github-apps/policy.json` is authoritative. `npm run verify:github-apps` rejects permission, visibility, event, inventory, or required-secret drift. Any permission increase requires a reviewed policy change and a corresponding threat-model update.
+`github-apps/policy.json` is authoritative. `npm run verify:github-apps` rejects permission, visibility, event, inventory, or required-secret drift. Any permission increase requires a reviewed policy change and a corresponding threat-model update. The Orchestrator's `Contents: read` permission is used only for exact-head machine-readable dependency-version evidence; PR titles are not version authority.
 
 ## Manifest bootstrap
 
