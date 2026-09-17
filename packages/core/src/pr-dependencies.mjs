@@ -2,6 +2,8 @@ const DIRECTIVE = /^\s*(?:(?:[-*+]\s+)(?:\[[ xX]\]\s+)?)?(?:depends\s+on|depends
 const FULL_TARGET = /^(?:https:\/\/github\.com\/)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:\/pull\/|#)([1-9]\d*)(?:\s*@\s*([^\s,]+))?$/iu;
 const LOCAL_TARGET = /^#([1-9]\d*)(?:\s*@\s*([^\s,]+))?$/u;
 const VERSION = /^[A-Za-z0-9][A-Za-z0-9._+:-]{0,127}$/u;
+const FENCE = /^\s*(`{3,}|~{3,})/u;
+const INDENTED_CODE = /^(?: {4,}|\t)/u;
 
 function normalizeRepositoryPart(value, field) {
   const text = String(value ?? '').trim();
@@ -54,6 +56,38 @@ function parseDependencyTarget(value, current) {
   });
 }
 
+function dependencyDirectiveValues(body) {
+  const values = [];
+  let fence = null;
+  let htmlComment = false;
+
+  for (const line of String(body ?? '').split(/\r?\n/u)) {
+    const fenceMatch = FENCE.exec(line);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0];
+      const length = fenceMatch[1].length;
+      if (fence === null) fence = { marker, length };
+      else if (fence.marker === marker && length >= fence.length) fence = null;
+      continue;
+    }
+    if (fence !== null) continue;
+
+    if (htmlComment) {
+      if (line.includes('-->')) htmlComment = false;
+      continue;
+    }
+    if (line.includes('<!--')) {
+      if (!line.includes('-->') || line.indexOf('<!--') > line.indexOf('-->')) htmlComment = true;
+      continue;
+    }
+    if (INDENTED_CODE.test(line)) continue;
+
+    const value = DIRECTIVE.exec(line)?.[1] ?? null;
+    if (value !== null) values.push(value);
+  }
+  return values;
+}
+
 export function parsePullRequestDependencies(body, { owner, repo, maxDependencies = 32 } = {}) {
   const current = {
     owner: normalizeRepositoryPart(owner, 'current owner'),
@@ -64,12 +98,7 @@ export function parsePullRequestDependencies(body, { owner, repo, maxDependencie
     throw new Error('maxDependencies must be an integer between 1 and 128');
   }
 
-  const declarations = String(body ?? '')
-    .split(/\r?\n/u)
-    .map((line) => DIRECTIVE.exec(line)?.[1] ?? null)
-    .filter((value) => value !== null)
-    .map((value) => parseDependencyTarget(value, current));
-
+  const declarations = dependencyDirectiveValues(body).map((value) => parseDependencyTarget(value, current));
   if (declarations.length > maximum) throw new Error(`PR declares more than ${maximum} dependencies`);
 
   const byKey = declarations.reduce((map, declaration) => {
