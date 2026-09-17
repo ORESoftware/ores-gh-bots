@@ -15,3 +15,29 @@ test('accepts bullet and checkbox dependency directives from PR templates', () =
     ['other/repo#11', null],
   ]);
 });
+
+test('ignores fenced, indented, and HTML-comment dependency examples', () => {
+  const parsed = parsePullRequestDependencies([
+    'Depends on: Org/Real#1 @ v1.0.0',
+    '',
+    '```text',
+    'Depends on: Org/Example#2 @ v9.9.9',
+    '```',
+    '',
+    '    Depends on: Org/IndentedExample#3',
+    '',
+    '<!--',
+    'Depends on: Org/HiddenExample#4',
+    '-->',
+    '',
+    '<!-- Depends on: Org/InlineHidden#5 -->',
+    '',
+    '~~~md',
+    '- Depends on: Org/TildeExample#6',
+    '~~~~',
+  ].join('\n'), { owner: 'Org', repo: 'App' });
+
+  assert.deepEqual(parsed.map((item) => [item.key, item.expectedVersion]), [
+    ['org/real#1', '1.0.0'],
+  ]);
+});
