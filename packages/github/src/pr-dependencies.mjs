@@ -112,6 +112,13 @@ function trustedGateState(result) {
   return Object.freeze({ state: 'success', reason: 'upstream exact-head ORES gate passed' });
 }
 
+function canonicalDependency(pullRequest, fallback) {
+  const fullName = String(pullRequest?.base?.repo?.full_name ?? '');
+  const [owner, repo] = fullName.split('/');
+  if (!owner || !repo) return fallback;
+  return Object.freeze({ ...fallback, owner, repo });
+}
+
 export async function evaluatePullRequestDependency({ client, auth, gateAppId, dependency }) {
   const coordinates = dependencyCoordinates(dependency);
   try {
@@ -136,7 +143,8 @@ export async function evaluatePullRequestDependency({ client, auth, gateAppId, d
       return Object.freeze({ dependency: coordinates.key, state: 'failure', reason: `upstream PR state=${pullRequest?.state ?? 'unknown'}`, headSha });
     }
 
-    const gateEvidence = await findTrustedGate(client, access.token, coordinates, headSha, gateAppId);
+    const canonical = canonicalDependency(pullRequest, coordinates);
+    const gateEvidence = await findTrustedGate(client, access.token, canonical, headSha, gateAppId);
     const gateState = trustedGateState(gateEvidence);
     if (gateState.state !== 'success') {
       return Object.freeze({
@@ -160,8 +168,8 @@ export async function evaluatePullRequestDependency({ client, auth, gateAppId, d
     const versionEvidence = await resolvePullRequestHeadVersion(
       client,
       access.token,
-      coordinates.owner,
-      coordinates.repo,
+      canonical.owner,
+      canonical.repo,
       headSha,
     );
     if (!versionEvidence) {
