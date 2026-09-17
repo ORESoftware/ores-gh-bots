@@ -5,6 +5,10 @@ import {
   routeWebhookEvent,
   verifyWebhookSignature,
 } from '../../../packages/core/src/index.mjs';
+import {
+  clearPullRequestDependencies,
+  dependentGateJobsForWebhook,
+} from '../../../packages/queue/src/index.mjs';
 
 function json(response, status, body) {
   const data = Buffer.from(JSON.stringify(body));
@@ -72,7 +76,15 @@ export function createWebhookServer({ config, queue, logger, metrics, readiness 
         return json(response, 403, { error: 'owner_not_allowed' });
       }
 
-      const jobs = routeWebhookEvent({ event, payload });
+      const dependencyJobs = dependentGateJobsForWebhook(queue, { event, payload });
+      if (event === 'pull_request' && payload.action === 'closed' && payload.pull_request?.number) {
+        clearPullRequestDependencies(queue, {
+          owner: payload.repository.owner.login,
+          repo: payload.repository.name,
+          prNumber: payload.pull_request.number,
+        });
+      }
+      const jobs = [...routeWebhookEvent({ event, payload }), ...dependencyJobs];
       const accepted = queue.acceptWebhook({
         deliveryId,
         event,
