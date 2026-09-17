@@ -340,6 +340,15 @@ test('normalizes persisted dependency coordinates, head SHA, and version evidenc
     assert.equal(result.accepted[0].dependencyOwner, 'other');
     assert.equal(result.accepted[0].dependencyRepo, 'library');
     assert.equal(result.accepted[0].expectedVersion, '1.2.3');
+
+    const replacement = replacePullRequestDependencies(queue, edge({
+      owner: ' ORG ',
+      repo: ' REPO-A ',
+      headSha: SHA_B.toUpperCase(),
+      dependencies: [{ owner: 'OTHER', repo: 'LIBRARY', prNumber: 42, expectedVersion: '1.2.3' }],
+    }));
+    assert.equal(replacement.count, 1);
+    assert.equal(replacement.accepted[0].dependentHeadSha, SHA_B);
   } finally {
     queue.close();
   }
