@@ -76,14 +76,11 @@ export function createWebhookServer({ config, queue, logger, metrics, readiness 
         return json(response, 403, { error: 'owner_not_allowed' });
       }
 
-      const dependencyJobs = dependentGateJobsForWebhook(queue, { event, payload });
-      if (event === 'pull_request' && payload.action === 'closed' && payload.pull_request?.number) {
-        clearPullRequestDependencies(queue, {
-          owner: payload.repository.owner.login,
-          repo: payload.repository.name,
-          prNumber: payload.pull_request.number,
-        });
-      }
+      const dependencyJobs = dependentGateJobsForWebhook(queue, {
+        event,
+        payload,
+        expectedGateAppId: config.apps?.gate?.id ?? null,
+      });
       const jobs = [...routeWebhookEvent({ event, payload }), ...dependencyJobs];
       const accepted = queue.acceptWebhook({
         deliveryId,
@@ -95,6 +92,24 @@ export function createWebhookServer({ config, queue, logger, metrics, readiness 
         metrics.increment('ores_webhooks_duplicate_total', { event });
         return json(response, 202, { accepted: true, duplicate: true, jobs: 0 });
       }
+
+      if (event === 'pull_request' && payload.action === 'closed' && payload.pull_request?.number) {
+        try {
+          clearPullRequestDependencies(queue, {
+            owner: payload.repository.owner.login,
+            repo: payload.repository.name,
+            prNumber: payload.pull_request.number,
+          });
+        } catch (error) {
+          metrics.increment('ores_dependency_cleanup_errors_total');
+          logger.error('failed to clear closed PR dependency edges', {
+            repository: `${payload.repository?.owner?.login ?? 'unknown'}/${payload.repository?.name ?? 'unknown'}`,
+            prNumber: payload.pull_request.number,
+            error: redactText(error?.stack ?? error),
+          });
+        }
+      }
+
       metrics.increment('ores_webhooks_total', { event, action: payload.action ?? 'none' });
       metrics.increment('ores_jobs_enqueued_total', { event }, accepted.inserted);
       logger.info('accepted webhook', {
