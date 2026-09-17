@@ -1,4 +1,4 @@
-const DIRECTIVE = /^\s*(?:depends\s+on|depends-on|dependency|requires|merge-after|stacked-on)\s*:?[ \t]+(.+?)\s*$/iu;
+const DIRECTIVE = /^\s*(?:(?:[-*+]\s+)(?:\[[ xX]\]\s+)?)?(?:depends\s+on|depends-on|dependency|requires|merge-after|stacked-on)\s*:?[ \t]+(.+?)\s*$/iu;
 const FULL_TARGET = /^(?:https:\/\/github\.com\/)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:\/pull\/|#)([1-9]\d*)(?:\s*@\s*([^\s,]+))?$/iu;
 const LOCAL_TARGET = /^#([1-9]\d*)(?:\s*@\s*([^\s,]+))?$/u;
 const VERSION = /^[A-Za-z0-9][A-Za-z0-9._+:-]{0,127}$/u;
@@ -80,17 +80,7 @@ export function parsePullRequestDependencies(body, { owner, repo, maxDependencie
     return existing ? map : new Map([...map, [declaration.key, declaration]]);
   }, new Map());
 
-  const selfKeyPrefix = `${current.owner}/${current.repo}#`;
-  return Object.freeze(
-    [...byKey.values()]
-      .map((declaration) => {
-        if (declaration.key.startsWith(selfKeyPrefix) && declaration.prNumber < 1) {
-          throw new Error('A pull request cannot depend on itself');
-        }
-        return declaration;
-      })
-      .sort((left, right) => left.key.localeCompare(right.key)),
-  );
+  return Object.freeze([...byKey.values()].sort((left, right) => left.key.localeCompare(right.key)));
 }
 
 export function normalizeDependencyGateStates(states) {
