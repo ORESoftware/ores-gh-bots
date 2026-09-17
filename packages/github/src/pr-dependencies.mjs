@@ -7,6 +7,7 @@ const VERSION_PATHS = Object.freeze([
   'pubspec.yaml',
   'gleam.toml',
 ]);
+const MAX_VERSION_MANIFEST_BYTES = 256 * 1024;
 
 function dependencyCoordinates(dependency) {
   const owner = String(dependency.owner ?? dependency.dependencyOwner ?? '').toLowerCase();
@@ -36,7 +37,11 @@ async function readTextAtRef(client, token, owner, repo, path, ref) {
     if (response.data?.type !== 'file' || response.data?.encoding !== 'base64' || typeof response.data?.content !== 'string') {
       throw new Error(`${path} is not a base64 GitHub contents file`);
     }
-    return Buffer.from(response.data.content.replace(/\s/gu, ''), 'base64').toString('utf8');
+    const bytes = Buffer.from(response.data.content.replace(/\s/gu, ''), 'base64');
+    if (bytes.length > MAX_VERSION_MANIFEST_BYTES) {
+      throw new Error(`${path} exceeds the dependency-version evidence size limit`);
+    }
+    return bytes.toString('utf8');
   } catch (error) {
     if (githubStatus(error) === 404) return null;
     throw error;
@@ -94,6 +99,8 @@ async function findTrustedGate(client, token, dependency, headSha, gateAppId) {
     { token },
   );
   const matchingExternal = (response.data?.check_runs ?? [])
+    .filter((check) => check.name === 'ores-review/gate')
+    .filter((check) => String(check.head_sha ?? '').toLowerCase() === String(headSha).toLowerCase())
     .filter((check) => check.external_id === externalId)
     .sort((left, right) => Number(right.id) - Number(left.id));
   const trusted = matchingExternal.find((check) => Number(check?.app?.id) === Number(gateAppId)) ?? null;
@@ -119,8 +126,31 @@ function canonicalDependency(pullRequest, fallback) {
   return Object.freeze({ ...fallback, owner, repo });
 }
 
+function sameRepository(left, right) {
+  return String(left?.owner ?? '').toLowerCase() === String(right?.owner ?? '').toLowerCase()
+    && String(left?.repo ?? '').toLowerCase() === String(right?.repo ?? '').toLowerCase();
+}
+
+function dependencyFailureReason(status) {
+  if (status === 404) return 'upstream PR or repository is inaccessible or missing';
+  if (status === 401 || status === 403) {
+    return 'upstream dependency is inaccessible; verify the Orchestrator App installation and Contents: read approval';
+  }
+  if (status === 429) return 'upstream dependency verification is rate-limited; retry after GitHub permits reads';
+  if (status >= 500 && status <= 599) return 'upstream dependency verification is temporarily unavailable from GitHub';
+  return 'upstream dependency verification failed closed';
+}
+
 export async function evaluatePullRequestDependency({ client, auth, gateAppId, dependency }) {
   const coordinates = dependencyCoordinates(dependency);
+  const trustedGateAppId = Number(gateAppId);
+  if (!Number.isSafeInteger(trustedGateAppId) || trustedGateAppId < 1) {
+    return Object.freeze({
+      dependency: coordinates.key,
+      state: 'failure',
+      reason: 'upstream gate App identity is not configured',
+    });
+  }
   try {
     const access = await auth.repoToken('orchestrator', coordinates.owner, coordinates.repo);
     const response = await client.request(
@@ -144,7 +174,16 @@ export async function evaluatePullRequestDependency({ client, auth, gateAppId, d
     }
 
     const canonical = canonicalDependency(pullRequest, coordinates);
-    const gateEvidence = await findTrustedGate(client, access.token, canonical, headSha, gateAppId);
+    if (!sameRepository(canonical, coordinates)) {
+      return Object.freeze({
+        dependency: coordinates.key,
+        state: 'failure',
+        reason: 'upstream PR base repository does not match the declared dependency',
+        headSha,
+        expectedVersion: coordinates.expectedVersion,
+      });
+    }
+    const gateEvidence = await findTrustedGate(client, access.token, canonical, headSha, trustedGateAppId);
     const gateState = trustedGateState(gateEvidence);
     if (gateState.state !== 'success') {
       return Object.freeze({
@@ -203,12 +242,11 @@ export async function evaluatePullRequestDependency({ client, auth, gateAppId, d
     });
   } catch (error) {
     const status = githubStatus(error);
-    const reason = status === 404
-      ? 'upstream PR or repository is inaccessible or missing'
-      : status === 403
-        ? 'upstream dependency is inaccessible; verify the Orchestrator App installation and Contents: read approval'
-        : `upstream dependency verification error: ${error instanceof Error ? error.message : String(error)}`;
-    return Object.freeze({ dependency: coordinates.key, state: 'failure', reason });
+    return Object.freeze({
+      dependency: coordinates.key,
+      state: 'failure',
+      reason: dependencyFailureReason(status),
+    });
   }
 }
 

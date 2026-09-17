@@ -45,7 +45,9 @@ The dependency passes only when:
 The version source order is `.zpkg.toml`, `package.json`, `Cargo.toml`,
 `pubspec.yaml`, then `gleam.toml`. `.zpkg.toml` reads the canonical
 `[package].version` field (with root-level `version` accepted only as a legacy
-fallback). PR titles are deliberately not version authority.
+fallback). PR titles are deliberately not version authority. Individual
+version-manifest responses are capped at 256 KiB before parsing so dependency
+verification cannot turn repository metadata into an unbounded allocation path.
 
 An open upstream PR may satisfy the dependency once its exact current head is
 green; it does not have to merge first. A merged upstream PR can also satisfy
@@ -57,6 +59,18 @@ window if an upstream PR moves while the downstream gate is being evaluated.
 The downstream PR body is also re-read before publication; if dependency
 declarations changed without a new commit, the current gate stays non-successful
 and a forced re-gate is queued for the same head SHA.
+
+Dependency evidence is normalized again at the persistence boundary rather than
+trusting only the PR-body parser. Repository coordinates are trimmed and
+case-normalized, head SHAs are canonicalized, versions are normalized, duplicate
+programmatic declarations are deduplicated, conflicting versions are rejected,
+and edge selection is deterministic. This keeps alternate callers from creating
+a graph state that the normal parser could never produce.
+
+Trusted upstream gate evidence is bound to the declared repository, exact head
+SHA, exact `ores-review/gate` name, deterministic external id, and configured
+Gate App identity. A PR payload whose base repository does not match the
+declared dependency fails closed instead of silently changing authority.
 
 ## Re-evaluation
 
@@ -99,3 +113,14 @@ approve the Orchestrator App's new `Contents: read` permission on every managed
 installation (or reinstall/update the installation as appropriate). A 403 while
 reading dependency evidence fails the gate closed with an explicit permission /
 installation diagnostic.
+
+
+## Failure classification
+
+Dependency verification remains fail closed, but user-visible gate reasons do
+not echo arbitrary upstream transport error strings. Missing/inaccessible
+repositories, installation/permission failures, GitHub rate limits, and GitHub
+5xx availability failures are classified into bounded diagnostics. Unknown
+verification errors use a generic fail-closed reason. This avoids turning a
+remote error body into gate output while retaining enough information to
+distinguish remediation from retry.

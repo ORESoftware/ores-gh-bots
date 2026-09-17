@@ -1,4 +1,4 @@
-import { pullRequestDependencyKey } from '../../core/src/pr-dependencies.mjs';
+import { normalizeDependencyVersion, pullRequestDependencyKey } from '../../core/src/pr-dependencies.mjs';
 
 const GATE_EXTERNAL_ID = /^gate:([^/]+)\/([^#]+)#([1-9]\d*)@([a-f0-9]{40})$/iu;
 
@@ -27,16 +27,28 @@ function database(queue) {
   return queue.db;
 }
 
+function normalizePullRequestCoordinates(owner, repo, prNumber) {
+  const normalizedOwner = String(owner ?? '').trim().toLowerCase();
+  const normalizedRepo = String(repo ?? '').trim().toLowerCase();
+  const normalizedPrNumber = Number(prNumber);
+  pullRequestDependencyKey(normalizedOwner, normalizedRepo, normalizedPrNumber);
+  return Object.freeze({
+    owner: normalizedOwner,
+    repo: normalizedRepo,
+    prNumber: normalizedPrNumber,
+  });
+}
+
 function normalizeEdge(edge) {
-  const dependentOwner = String(edge.dependentOwner ?? '').toLowerCase();
-  const dependentRepo = String(edge.dependentRepo ?? '').toLowerCase();
+  const dependentOwner = String(edge.dependentOwner ?? '').trim().toLowerCase();
+  const dependentRepo = String(edge.dependentRepo ?? '').trim().toLowerCase();
   const dependentPrNumber = Number(edge.dependentPrNumber);
-  const dependentHeadSha = String(edge.dependentHeadSha ?? '');
+  const dependentHeadSha = String(edge.dependentHeadSha ?? '').trim().toLowerCase();
   const dependentInstallationId = Number(edge.dependentInstallationId);
-  const dependencyOwner = String(edge.dependencyOwner ?? '').toLowerCase();
-  const dependencyRepo = String(edge.dependencyRepo ?? '').toLowerCase();
+  const dependencyOwner = String(edge.dependencyOwner ?? '').trim().toLowerCase();
+  const dependencyRepo = String(edge.dependencyRepo ?? '').trim().toLowerCase();
   const dependencyPrNumber = Number(edge.dependencyPrNumber);
-  const expectedVersion = edge.expectedVersion ?? null;
+  const expectedVersion = normalizeDependencyVersion(edge.expectedVersion ?? null);
   pullRequestDependencyKey(dependentOwner, dependentRepo, dependentPrNumber);
   pullRequestDependencyKey(dependencyOwner, dependencyRepo, dependencyPrNumber);
   if (!/^[a-f0-9]{40}$/iu.test(dependentHeadSha)) throw new Error('dependent head SHA is invalid');
@@ -106,12 +118,12 @@ function selectAcyclicEdges(baseGraph, dependentKey, edges) {
 }
 
 export function clearPullRequestDependencies(queue, { owner, repo, prNumber }) {
-  pullRequestDependencyKey(owner, repo, prNumber);
+  const dependent = normalizePullRequestCoordinates(owner, repo, prNumber);
   const db = database(queue);
   const result = db.prepare(`
     DELETE FROM pr_dependencies
     WHERE dependent_owner = ? AND dependent_repo = ? AND dependent_pr_number = ?
-  `).run(String(owner).toLowerCase(), String(repo).toLowerCase(), Number(prNumber));
+  `).run(dependent.owner, dependent.repo, dependent.prNumber);
   return Object.freeze({ removed: Number(result.changes) });
 }
 
@@ -124,10 +136,11 @@ export function replacePullRequestDependencies(queue, {
   declarations,
 }) {
   const db = database(queue);
+  const dependent = normalizePullRequestCoordinates(dependentOwner, dependentRepo, dependentPrNumber);
   const normalized = (declarations ?? []).map((declaration) => normalizeEdge({
-    dependentOwner,
-    dependentRepo,
-    dependentPrNumber,
+    dependentOwner: dependent.owner,
+    dependentRepo: dependent.repo,
+    dependentPrNumber: dependent.prNumber,
     dependentHeadSha,
     dependentInstallationId,
     dependencyOwner: declaration.owner,
@@ -135,20 +148,31 @@ export function replacePullRequestDependencies(queue, {
     dependencyPrNumber: declaration.prNumber,
     expectedVersion: declaration.expectedVersion,
   }));
-  const dependentKey = pullRequestDependencyKey(dependentOwner, dependentRepo, dependentPrNumber);
+  const byDependency = normalized.reduce((map, edge) => {
+    const key = edgeKey(edge);
+    const existing = map.get(key);
+    if (existing && existing.expectedVersion !== edge.expectedVersion) {
+      throw new Error(`Conflicting version requirements for ${key}`);
+    }
+    return existing ? map : new Map([...map, [key, edge]]);
+  }, new Map());
+  const canonicalEdges = Object.freeze(
+    [...byDependency.values()].sort((left, right) => edgeKey(left).localeCompare(edgeKey(right))),
+  );
+  const dependentKey = pullRequestDependencyKey(dependent.owner, dependent.repo, dependent.prNumber);
 
   db.exec('BEGIN IMMEDIATE');
   try {
     const retained = db.prepare(`
       SELECT * FROM pr_dependencies
       WHERE NOT (dependent_owner = ? AND dependent_repo = ? AND dependent_pr_number = ?)
-    `).all(String(dependentOwner).toLowerCase(), String(dependentRepo).toLowerCase(), Number(dependentPrNumber));
-    const selected = selectAcyclicEdges(rowsToAdjacency(retained), dependentKey, normalized);
+    `).all(dependent.owner, dependent.repo, dependent.prNumber);
+    const selected = selectAcyclicEdges(rowsToAdjacency(retained), dependentKey, canonicalEdges);
 
     db.prepare(`
       DELETE FROM pr_dependencies
       WHERE dependent_owner = ? AND dependent_repo = ? AND dependent_pr_number = ?
-    `).run(String(dependentOwner).toLowerCase(), String(dependentRepo).toLowerCase(), Number(dependentPrNumber));
+    `).run(dependent.owner, dependent.repo, dependent.prNumber);
     const insert = db.prepare(`
       INSERT INTO pr_dependencies(
         dependent_owner, dependent_repo, dependent_pr_number, dependent_head_sha, dependent_installation_id,
