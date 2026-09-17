@@ -122,6 +122,8 @@ export async function completeGateCheck({ client, token, owner, repo, checkRunId
   const ciLines = gate.ciStates.map((item) => `- ${item.context}: **${item.state}** — ${item.reason}`);
   const projectionLines = (gate.projectionStates ?? [])
     .map((item) => `- ${item.projectionKind ?? 'invalid'}: **${item.state}** — ${item.reason}`);
+  const dependencyLines = (gate.dependencyStates ?? [])
+    .map((item) => `- ${item.dependency ?? 'invalid'}: **${item.state}** — ${item.reason}`);
   const summary = [
     '## Provider reviews',
     ...providerLines,
@@ -129,6 +131,8 @@ export async function completeGateCheck({ client, token, owner, repo, checkRunId
     ...ciLines,
     projectionLines.length ? '\n## Contract projections' : '',
     ...projectionLines,
+    dependencyLines.length ? '\n## Pull-request dependencies' : '',
+    ...dependencyLines,
   ].filter(Boolean).join('\n');
 
   const payload = {
@@ -143,7 +147,7 @@ export async function completeGateCheck({ client, token, owner, repo, checkRunId
   if (gate.status === 'completed') {
     payload.conclusion = gate.conclusion;
     payload.completed_at = new Date().toISOString();
-    payload.actions = [{ label: 'Re-evaluate', description: 'Re-evaluate provider, CI, and contract evidence.', identifier: 'regate' }];
+    payload.actions = [{ label: 'Re-evaluate', description: 'Re-evaluate provider, CI, contract, and PR-dependency evidence.', identifier: 'regate' }];
   }
   return updateCheckRun(client, token, owner, repo, checkRunId, payload);
 }
