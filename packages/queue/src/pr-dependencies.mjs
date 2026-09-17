@@ -54,13 +54,22 @@ function normalizeEdge(edge) {
   });
 }
 
+function rowKeys(row) {
+  return {
+    from: pullRequestDependencyKey(row.dependent_owner, row.dependent_repo, row.dependent_pr_number),
+    to: pullRequestDependencyKey(row.dependency_owner, row.dependency_repo, row.dependency_pr_number),
+  };
+}
+
+function addAdjacencyEdge(graph, from, to) {
+  const nextTargets = new Set([...(graph.get(from) ?? []), to]);
+  return new Map([...graph, [from, nextTargets]]);
+}
+
 function rowsToAdjacency(rows) {
   return rows.reduce((graph, row) => {
-    const from = pullRequestDependencyKey(row.dependent_owner, row.dependent_repo, row.dependent_pr_number);
-    const to = pullRequestDependencyKey(row.dependency_owner, row.dependency_repo, row.dependency_pr_number);
-    const current = graph.get(from) ?? new Set();
-    current.add(to);
-    return new Map([...graph, [from, current]]);
+    const { from, to } = rowKeys(row);
+    return addAdjacencyEdge(graph, from, to);
   }, new Map());
 }
 
@@ -69,6 +78,29 @@ function reaches(graph, start, target, seen = new Set()) {
   if (seen.has(start)) return false;
   const nextSeen = new Set([...seen, start]);
   return [...(graph.get(start) ?? [])].some((next) => reaches(graph, next, target, nextSeen));
+}
+
+function edgeKey(edge) {
+  return pullRequestDependencyKey(edge.dependencyOwner, edge.dependencyRepo, edge.dependencyPrNumber);
+}
+
+function selectAcyclicEdges(baseGraph, dependentKey, edges) {
+  return edges.reduce((state, edge) => {
+    const dependencyKey = edgeKey(edge);
+    const cyclic = dependencyKey === dependentKey || reaches(state.graph, dependencyKey, dependentKey);
+    if (cyclic) {
+      return Object.freeze({
+        graph: state.graph,
+        accepted: state.accepted,
+        ignored: Object.freeze([...state.ignored, Object.freeze({ ...edge, reason: 'cycle' })]),
+      });
+    }
+    return Object.freeze({
+      graph: addAdjacencyEdge(state.graph, dependentKey, dependencyKey),
+      accepted: Object.freeze([...state.accepted, edge]),
+      ignored: state.ignored,
+    });
+  }, Object.freeze({ graph: baseGraph, accepted: Object.freeze([]), ignored: Object.freeze([]) }));
 }
 
 export function replacePullRequestDependencies(queue, {
@@ -92,9 +124,6 @@ export function replacePullRequestDependencies(queue, {
     expectedVersion: declaration.expectedVersion,
   }));
   const dependentKey = pullRequestDependencyKey(dependentOwner, dependentRepo, dependentPrNumber);
-  if (normalized.some((edge) => pullRequestDependencyKey(edge.dependencyOwner, edge.dependencyRepo, edge.dependencyPrNumber) === dependentKey)) {
-    throw new Error(`Pull-request dependency cycle detected: ${dependentKey} depends on itself`);
-  }
 
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -102,23 +131,7 @@ export function replacePullRequestDependencies(queue, {
       SELECT * FROM pr_dependencies
       WHERE NOT (dependent_owner = ? AND dependent_repo = ? AND dependent_pr_number = ?)
     `).all(String(dependentOwner).toLowerCase(), String(dependentRepo).toLowerCase(), Number(dependentPrNumber));
-    const proposedRows = normalized.map((edge) => ({
-      dependent_owner: edge.dependentOwner,
-      dependent_repo: edge.dependentRepo,
-      dependent_pr_number: edge.dependentPrNumber,
-      dependency_owner: edge.dependencyOwner,
-      dependency_repo: edge.dependencyRepo,
-      dependency_pr_number: edge.dependencyPrNumber,
-    }));
-    const graph = rowsToAdjacency([...retained, ...proposedRows]);
-    const cycle = normalized.find((edge) => reaches(
-      graph,
-      pullRequestDependencyKey(edge.dependencyOwner, edge.dependencyRepo, edge.dependencyPrNumber),
-      dependentKey,
-    ));
-    if (cycle) {
-      throw new Error(`Pull-request dependency cycle detected through ${pullRequestDependencyKey(cycle.dependencyOwner, cycle.dependencyRepo, cycle.dependencyPrNumber)}`);
-    }
+    const selected = selectAcyclicEdges(rowsToAdjacency(retained), dependentKey, normalized);
 
     db.prepare(`
       DELETE FROM pr_dependencies
@@ -131,7 +144,7 @@ export function replacePullRequestDependencies(queue, {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const timestamp = Date.now();
-    normalized.forEach((edge) => insert.run(
+    selected.accepted.forEach((edge) => insert.run(
       edge.dependentOwner,
       edge.dependentRepo,
       edge.dependentPrNumber,
@@ -144,7 +157,11 @@ export function replacePullRequestDependencies(queue, {
       timestamp,
     ));
     db.exec('COMMIT');
-    return Object.freeze({ count: normalized.length });
+    return Object.freeze({
+      count: selected.accepted.length,
+      accepted: selected.accepted,
+      ignored: selected.ignored,
+    });
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch {}
     throw error;
