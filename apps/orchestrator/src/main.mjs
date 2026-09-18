@@ -4,6 +4,7 @@ import { createLogger, loadConfig, Metrics, validateRuntimeConfig } from '../../
 import { SqliteQueue } from '../../../packages/queue/src/index.mjs';
 import { ReviewEngine } from '../../../packages/engine/src/index.mjs';
 import { Reconciler, startReconciler } from './reconciler.mjs';
+import { ReviewerReconciler, startReviewerReconciler } from './reviewer-reconciler.mjs';
 import { createWebhookServer } from './server.mjs';
 import { createWorkerPool } from './worker.mjs';
 
