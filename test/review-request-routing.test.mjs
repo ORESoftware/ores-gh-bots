@@ -33,14 +33,12 @@ test('review request routing does not turn unrelated pull-request actions into g
 });
 
 test('malformed review-request payloads fail closed without partial jobs', () => {
-  const missingInstallation = payload();
-  delete missingInstallation.installation;
-  assert.deepEqual(routeWebhookEvent({ event: 'pull_request', payload: missingInstallation }), []);
-
-  const missingHead = payload();
-  delete missingHead.pull_request.head;
-  assert.throws(
-    () => routeWebhookEvent({ event: 'pull_request', payload: missingHead }),
-    /Cannot read properties/u,
-  );
+  const variants = [payload(), payload(), payload(), payload()];
+  delete variants[0].installation;
+  delete variants[1].pull_request.head;
+  delete variants[2].repository.owner;
+  delete variants[3].pull_request.number;
+  for (const malformed of variants) {
+    assert.deepEqual(routeWebhookEvent({ event: 'pull_request', payload: malformed }), []);
+  }
 });
