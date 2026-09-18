@@ -16,7 +16,7 @@
     "worker": "node apps/orchestrator/src/main.mjs --worker-only",
     "cli": "node apps/cli/src/main.mjs",
     "hardening": "node apps/cli/src/hardening.mjs",
-    "review": "node apps/runner/src/main.mjs",
+    "review": "node apps/runner/src/main.mjs review",
     "reconcile": "node --experimental-strip-types src/cli.ts",
     "hygiene": "node --experimental-strip-types src/hygiene-cli.ts",
     "test": "npm run test:review && npm run test:nightly",
