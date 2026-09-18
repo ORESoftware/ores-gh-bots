@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { AppAuth, GitHubClient } from '../../../packages/github/src/index.mjs';
-import { createLogger, loadConfig, Metrics, validateRuntimeConfig } from '../../../packages/core/src/index.mjs';
+import { createLogger, loadConfig, Metrics, resolveCli, validateRuntimeConfig } from '../../../packages/core/src/index.mjs';
 import { SqliteQueue } from '../../../packages/queue/src/index.mjs';
 import { ReviewEngine } from '../../../packages/engine/src/index.mjs';
 import { Reconciler, startReconciler } from './reconciler.mjs';
@@ -8,9 +8,16 @@ import { ReviewerReconciler, startReviewerReconciler } from './reviewer-reconcil
 import { createWebhookServer } from './server.mjs';
 import { createWorkerPool } from './worker.mjs';
 
-const config = loadConfig();
+const cli = resolveCli();
+if (cli.help) {
+  cli.printHelp();
+  process.exit(0);
+}
+if (cli.command) throw new Error(`Unexpected command for orchestrator: ${cli.command}`);
+const workerOnly = Boolean(cli.values.ORES_WORKER_ONLY);
+const config = loadConfig(cli.env);
 validateRuntimeConfig(config, {
-  webhook: !process.argv.includes('--worker-only'),
+  webhook: !workerOnly,
   providers: config.gha.mode !== 'offload',
 });
 const logger = createLogger({ service: 'ores-gh-bots' });
@@ -38,7 +45,7 @@ const workerPool = createWorkerPool({
   },
 });
 
-if (!process.argv.includes('--worker-only')) {
+if (!workerOnly) {
   server = createWebhookServer({ config, queue, logger: logger.child({ component: 'http' }), metrics, readiness: () => ready && workerPool.isHealthy() });
   listenPromise = new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -87,8 +94,6 @@ function shutdown(signal) {
   logger.info('shutting down', { signal });
   abortController.abort();
   shutdownPromise = (async () => {
-    // A stuck engine or HTTP client must not leave a zombie process forever.
-    // Forced exit intentionally leaves outstanding leases for startup recovery.
     const deadline = setTimeout(() => {
       logger.error('shutdown deadline exceeded');
       process.exit(1);
