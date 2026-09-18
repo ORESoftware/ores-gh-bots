@@ -4,10 +4,12 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   AppAuth,
+  buildReviewerQueue,
   buildRulesetPayload,
   GitHubClient,
   listAppInstallations,
   listInstallationRepositories,
+  REVIEWER_HINTS_MAX_BYTES,
   upsertRepositoryRuleset,
 } from '../../../packages/github/src/index.mjs';
 import { createLogger, loadConfig, ownerIsAllowed, redactObject, validateRuntimeConfig, verifyCanaryEvidence } from '../../../packages/core/src/index.mjs';
@@ -75,6 +77,7 @@ function usage() {
   npm run cli -- fleet discover [--limit N]
   npm run cli -- rulesets plan|apply [--repository OWNER/REPO] [--enforcement disabled|evaluate|active] [--branch-mode all|protected] [--limit N]
   npm run cli -- canary verify --evidence PATH [--expected-digest SHA256]
+  npm run cli -- reviewer plan [--reviewer LOGIN] [--limit N] [--hints PATH]
 `);
 }
 
@@ -133,6 +136,24 @@ if (group === 'manifest' && action === 'print') {
     }
   }
   console.log(JSON.stringify(redactObject({ action, enforcement, branch_mode: flags['branch-mode'] ?? 'protected', results }), null, 2));
+} else if (group === 'reviewer' && action === 'plan') {
+  const token = String(process.env.GITHUB_REVIEWER_TOKEN ?? '').trim();
+  if (!token) throw new Error('GITHUB_REVIEWER_TOKEN is required for reviewer planning');
+  const hints = flags.hints
+    ? await readBoundedJson(resolve(process.cwd(), String(flags.hints)), REVIEWER_HINTS_MAX_BYTES)
+    : null;
+  const client = new GitHubClient({
+    apiBaseUrl: config.github.apiBaseUrl,
+    apiVersion: config.github.apiVersion,
+  });
+  const queue = await buildReviewerQueue({
+    client,
+    token,
+    reviewerLogin: String(flags.reviewer ?? 'the1mills'),
+    hints,
+    limit: Number(flags.limit ?? 100),
+  });
+  console.log(JSON.stringify(redactObject(queue), null, 2));
 } else if (group === 'canary' && action === 'verify') {
   const evidencePath = String(flags.evidence ?? '').trim();
   if (!evidencePath) throw new Error('Canary verification requires --evidence PATH');
