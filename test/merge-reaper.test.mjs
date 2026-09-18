@@ -266,3 +266,61 @@ test('candidate ordering rejects duplicates and ignores dependencies outside the
     ['org/a#1', 'org/b#2'],
   );
 });
+
+
+test('gate evidence must carry the exact head and deterministic external id', () => {
+  const missingHead = evaluate({ gateCheck: gate({ head_sha: undefined }) });
+  assert.equal(missingHead.eligible, false);
+  assert.equal(missingHead.reasons.includes('gate-head-sha-mismatch'), true);
+
+  const forged = evaluate({ gateCheck: gate({ external_id: `gate:Org/Other#7@${'a'.repeat(40)}` }) });
+  assert.equal(forged.eligible, false);
+  assert.equal(forged.reasons.includes('gate-external-id-mismatch'), true);
+});
+
+test('aggregate gate cannot masquerade as independent CI and duplicate contexts fail closed', () => {
+  const onlyGate = evaluate({ ciStates: [{ context: 'ores-review/gate', state: 'success' }] });
+  assert.equal(onlyGate.reasons.includes('no-independent-ci-contexts'), true);
+
+  const duplicate = evaluate({
+    ciStates: [
+      { context: 'ci/verify', state: 'success' },
+      { context: 'ci/verify', state: 'success' },
+    ],
+  });
+  assert.equal(duplicate.reasons.includes('duplicate-ci-context:ci/verify'), true);
+});
+
+test('human-approval policy requires an actual GitHub User approval', () => {
+  const humanPolicy = validateMergeReaperPolicy({ ...policy, requireHumanApproval: true });
+  for (const type of ['', 'Bot', 'Organization']) {
+    const result = evaluate({
+      policy: humanPolicy,
+      reviews: [{
+        id: 1,
+        state: 'APPROVED',
+        submitted_at: '2026-09-02T00:00:00Z',
+        user: { login: 'reviewer', type },
+      }],
+    });
+    assert.equal(result.reasons.includes('missing-human-approval'), true);
+  }
+});
+
+test('policy boolean fields reject truthy strings instead of widening policy', () => {
+  assert.throws(
+    () => validateMergeReaperPolicy({ requireOptInLabel: 'false' }),
+    /requireOptInLabel must be a boolean/u,
+  );
+  assert.throws(
+    () => validateMergeReaperPolicy({ requireHumanApproval: 'true' }),
+    /requireHumanApproval must be a boolean/u,
+  );
+});
+
+test('canonical dependency parser rejects ambiguous multi-target reaper directives', () => {
+  assert.throws(
+    () => parseMergeReaperDependencies('Depends-On: other/lib#1, #2', { owner: 'Org', repo: 'Repo' }),
+    /Invalid PR dependency declaration/u,
+  );
+});
