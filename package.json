@@ -16,9 +16,10 @@
     "worker": "node apps/orchestrator/src/main.mjs --worker-only",
     "cli": "node apps/cli/src/main.mjs",
     "hardening": "node apps/cli/src/hardening.mjs",
-    "review": "node apps/runner/src/main.mjs",
+    "review": "node apps/runner/src/main.mjs review",
     "reconcile": "node --experimental-strip-types src/cli.ts",
     "hygiene": "node --experimental-strip-types src/hygiene-cli.ts",
+    "build:flags2env": "node node_modules/node-gyp/bin/node-gyp.js rebuild --directory=node_modules/@oresoftware/f2e/clients/nodejs",
     "test": "npm run test:review && npm run test:nightly",
     "test:review": "node --test --test-reporter=spec",
     "test:nightly": "node --experimental-strip-types --test test/*.test.ts",
@@ -33,7 +34,8 @@
     "ci:classify": "node scripts/classify-workflow-evidence.mjs"
   },
   "comments": {
-    "typecheck": "The nightly reconciler and its tests use only Node built-ins, so there is no install step; `npm run typecheck` pulls typescript/@types/node through npx on demand so the workspace lockfile stays dependency-free (`npm ci --ignore-scripts` in CI)."
+    "typecheck": "The nightly reconciler and its tests use only Node built-ins; `npm run typecheck` pulls typescript/@types/node through npx on demand rather than adding them to the runtime dependency graph.",
+    "build:flags2env": "CI installs with --ignore-scripts, then explicitly compiles only the lockfile-pinned flags2env native addon instead of enabling arbitrary dependency lifecycle scripts."
   },
   "oresLint": {
     "note": "Declared, not installed. ores-lint resolves these from a global install - see .ores-lint/README.md",
@@ -43,5 +45,8 @@
     },
     "install": "npm i -g eslint typescript-eslint"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@oresoftware/f2e": "https://codeload.github.com/ORESoftware/flags-2-env/tar.gz/5a44d6a38f06c2765e80676618fd72bf4e59b984"
+  }
 }
