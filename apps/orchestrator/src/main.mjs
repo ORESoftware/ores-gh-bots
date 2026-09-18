@@ -61,6 +61,24 @@ if (config.reconciliation.enabled && !abortController.signal.aborted) {
     logger.error('initial reconciliation failed', { error: error?.stack ?? String(error) });
   });
 }
+
+const reviewerReconciler = new ReviewerReconciler({
+  config,
+  client,
+  logger: logger.child({ component: 'reviewer-reconciler' }),
+  metrics,
+});
+if (config.reviewer.approvalMode !== 'off' && !abortController.signal.aborted) {
+  startReviewerReconciler(
+    reviewerReconciler,
+    config.reconciliation.intervalMs,
+    abortController.signal,
+  ).catch((error) => {
+    logger.error('initial bound reviewer reconciliation failed', {
+      error: error?.stack ?? String(error),
+    });
+  });
+}
 ready = !abortController.signal.aborted;
 
 function shutdown(signal) {
