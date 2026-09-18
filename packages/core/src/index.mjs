@@ -13,3 +13,5 @@ export * from './metrics.mjs';
 export * from './contract-admission.mjs';
 export * from './contract-policy.mjs';
 export * from './pr-dependencies.mjs';
+
+export * from './canary-evidence.mjs';
