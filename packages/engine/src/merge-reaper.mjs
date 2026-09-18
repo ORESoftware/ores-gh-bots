@@ -39,6 +39,11 @@ function positiveInteger(value, field, { maximum = Number.MAX_SAFE_INTEGER } = {
   return parsed;
 }
 
+function strictBoolean(value, field) {
+  if (typeof value !== 'boolean') throw new Error(`${field} must be a boolean`);
+  return value;
+}
+
 function uniqueStrings(values, field, { lowerCase = false } = {}) {
   if (!Array.isArray(values)) throw new Error(`${field} must be an array`);
   const normalized = values.map((value, index) => cleanString(value, `${field}[${index}]`));
@@ -110,10 +115,10 @@ export function validateMergeReaperPolicy(input = {}) {
     ),
     mergeMethod: cleanString(merged.mergeMethod, 'mergeMethod'),
     allowedBaseBranches: uniqueStrings(merged.allowedBaseBranches, 'allowedBaseBranches'),
-    requireOptInLabel: Boolean(merged.requireOptInLabel),
+    requireOptInLabel: strictBoolean(merged.requireOptInLabel, 'requireOptInLabel'),
     optInLabels: uniqueStrings(merged.optInLabels, 'optInLabels', { lowerCase: true }),
     denyLabels: uniqueStrings(merged.denyLabels, 'denyLabels', { lowerCase: true }),
-    requireHumanApproval: Boolean(merged.requireHumanApproval),
+    requireHumanApproval: strictBoolean(merged.requireHumanApproval, 'requireHumanApproval'),
     ignoredCiContexts: uniqueStrings(merged.ignoredCiContexts, 'ignoredCiContexts'),
     repositoryDependencies: normalizeRepositoryDependencies(merged.repositoryDependencies),
   };
@@ -150,7 +155,7 @@ function labelNames(pullRequest) {
 function latestReviewStates(reviews) {
   const latest = new Map();
   for (const review of reviews ?? []) {
-    const login = String(review?.user?.login ?? '').trim();
+    const login = String(review?.user?.login ?? '').trim().toLowerCase();
     if (!login || String(review?.state ?? '').toUpperCase() === 'PENDING') continue;
     const submittedAt = Date.parse(review?.submitted_at ?? '') || 0;
     const current = latest.get(login);
@@ -185,7 +190,6 @@ export function evaluateMergeCandidate({
   now = new Date(),
   gateCheck = null,
   expectedGateAppId,
-  expectedGateExternalId,
   ciStates = [],
   reviews = [],
   unresolvedReviewThreads = null,
@@ -229,15 +233,28 @@ export function evaluateMergeCandidate({
   if (!Number.isSafeInteger(gateAppId) || gateAppId < 1) reasons.push('invalid-expected-gate-app-id');
   if (!gateCheck) reasons.push('missing-ores-gate');
   else {
+    const expectedExternalId = key && pullRequest?.head?.sha
+      ? `gate:${String(owner)}/${String(repo)}#${number}@${pullRequest.head.sha}`
+      : null;
     if (gateCheck.name !== 'ores-review/gate') reasons.push('unexpected-gate-context');
     if (Number(gateCheck?.app?.id) !== gateAppId) reasons.push('gate-app-identity-mismatch');
-    if (gateCheck.external_id !== expectedGateExternalId) reasons.push('gate-external-id-mismatch');
-    if (gateCheck.head_sha && gateCheck.head_sha !== pullRequest?.head?.sha) reasons.push('gate-head-sha-mismatch');
+    if (!expectedExternalId || gateCheck.external_id !== expectedExternalId) reasons.push('gate-external-id-mismatch');
+    if (gateCheck.head_sha !== pullRequest?.head?.sha) reasons.push('gate-head-sha-mismatch');
     if (checkState(gateCheck) !== 'success') reasons.push(`gate-not-success:${checkState(gateCheck)}`);
   }
 
   const ignoredContexts = new Set(normalizedPolicy.ignoredCiContexts);
-  const effectiveCiStates = (ciStates ?? []).filter((item) => !ignoredContexts.has(item.context));
+  const seenCiContexts = new Set();
+  const effectiveCiStates = (ciStates ?? []).filter((item) => {
+    const context = String(item?.context ?? '');
+    if (!context || context === 'ores-review/gate' || ignoredContexts.has(context)) return false;
+    if (seenCiContexts.has(context)) {
+      reasons.push(`duplicate-ci-context:${context}`);
+      return false;
+    }
+    seenCiContexts.add(context);
+    return true;
+  });
   if (effectiveCiStates.length === 0) reasons.push('no-independent-ci-contexts');
   for (const ci of effectiveCiStates) {
     if (ci.state !== 'success') reasons.push(`ci-not-success:${ci.context}:${ci.state}`);
@@ -246,7 +263,7 @@ export function evaluateMergeCandidate({
   const reviewStates = latestReviewStates(reviews);
   if (reviewStates.some((review) => review.state === 'CHANGES_REQUESTED')) reasons.push('changes-requested');
   if (normalizedPolicy.requireHumanApproval
-    && !reviewStates.some((review) => review.state === 'APPROVED' && review.type !== 'Bot')) {
+    && !reviewStates.some((review) => review.state === 'APPROVED' && review.type === 'User')) {
     reasons.push('missing-human-approval');
   }
 
