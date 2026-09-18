@@ -10,9 +10,10 @@ import {
   listInstallationRepositories,
   upsertRepositoryRuleset,
 } from '../../../packages/github/src/index.mjs';
-import { createLogger, loadConfig, ownerIsAllowed, redactObject, validateRuntimeConfig } from '../../../packages/core/src/index.mjs';
+import { createLogger, loadConfig, ownerIsAllowed, redactObject, validateRuntimeConfig, verifyCanaryEvidence } from '../../../packages/core/src/index.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const MAX_CANARY_EVIDENCE_BYTES = 1_000_000;
 
 function parseArgs(argv) {
   const positional = [];
@@ -30,6 +31,16 @@ function parseArgs(argv) {
 
 async function readJson(path) {
   return JSON.parse(await readFile(resolve(root, path), 'utf8'));
+}
+
+async function readBoundedJson(path, maxBytes) {
+  const content = await readFile(path);
+  if (content.length > maxBytes) throw new Error(`JSON input exceeds ${maxBytes} bytes`);
+  try {
+    return JSON.parse(content.toString('utf8'));
+  } catch {
+    throw new Error('JSON input is not valid JSON');
+  }
 }
 
 async function discover({ config, client, auth, limit = Infinity }) {
@@ -63,6 +74,7 @@ function usage() {
   npm run cli -- manifest print ROLE
   npm run cli -- fleet discover [--limit N]
   npm run cli -- rulesets plan|apply [--repository OWNER/REPO] [--enforcement disabled|evaluate|active] [--branch-mode all|protected] [--limit N]
+  npm run cli -- canary verify --evidence PATH [--expected-digest SHA256]
 `);
 }
 
@@ -121,6 +133,15 @@ if (group === 'manifest' && action === 'print') {
     }
   }
   console.log(JSON.stringify(redactObject({ action, enforcement, branch_mode: flags['branch-mode'] ?? 'protected', results }), null, 2));
+} else if (group === 'canary' && action === 'verify') {
+  const evidencePath = String(flags.evidence ?? '').trim();
+  if (!evidencePath) throw new Error('Canary verification requires --evidence PATH');
+  const evidence = await readBoundedJson(resolve(process.cwd(), evidencePath), MAX_CANARY_EVIDENCE_BYTES);
+  const result = verifyCanaryEvidence(evidence, {
+    expectedDigest: flags['expected-digest'] ?? null,
+  });
+  console.log(JSON.stringify(redactObject(result), null, 2));
+  if (!result.ok) process.exitCode = 1;
 } else {
   usage();
   process.exitCode = 2;
