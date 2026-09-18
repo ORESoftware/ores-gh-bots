@@ -60,6 +60,25 @@ function normalizeRepository(value, field = 'repository') {
   return repository.toLowerCase();
 }
 
+function pullRequestRepositoryCoordinates(pullRequest) {
+  const fullName = String(pullRequest?.base?.repo?.full_name ?? '').trim();
+  const fallbackOwner = String(pullRequest?.base?.repo?.owner?.login ?? '').trim();
+  const fallbackRepo = String(pullRequest?.base?.repo?.name ?? '').trim();
+  if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(fullName)) {
+    const [owner, repo] = fullName.split('/');
+    if (fallbackOwner && fallbackOwner.toLowerCase() !== owner.toLowerCase()) return null;
+    if (fallbackRepo && fallbackRepo.toLowerCase() !== repo.toLowerCase()) return null;
+    return Object.freeze({ owner, repo });
+  }
+  if (!fallbackOwner || !fallbackRepo) return null;
+  try {
+    normalizeRepository(`${fallbackOwner}/${fallbackRepo}`);
+    return Object.freeze({ owner: fallbackOwner, repo: fallbackRepo });
+  } catch {
+    return null;
+  }
+}
+
 function normalizeRepositoryDependencies(value) {
   if (value === undefined || value === null) return {};
   if (typeof value !== 'object' || Array.isArray(value)) {
@@ -198,10 +217,9 @@ export function evaluateMergeCandidate({
   const normalizedPolicy = validateMergeReaperPolicy(policy);
   const reasons = [];
   const number = Number(pullRequest?.number);
-  const owner = pullRequest?.base?.repo?.owner?.login
-    ?? String(pullRequest?.base?.repo?.full_name ?? '').split('/')[0];
-  const repo = pullRequest?.base?.repo?.name
-    ?? String(pullRequest?.base?.repo?.full_name ?? '').split('/')[1];
+  const coordinates = pullRequestRepositoryCoordinates(pullRequest);
+  const owner = coordinates?.owner ?? '';
+  const repo = coordinates?.repo ?? '';
   let key = null;
   try {
     key = pullRequestKey(owner, repo, number);
@@ -234,7 +252,7 @@ export function evaluateMergeCandidate({
   if (!gateCheck) reasons.push('missing-ores-gate');
   else {
     const expectedExternalId = key && pullRequest?.head?.sha
-      ? `gate:${String(owner)}/${String(repo)}#${number}@${pullRequest.head.sha}`
+      ? `gate:${owner}/${repo}#${number}@${pullRequest.head.sha}`
       : null;
     if (gateCheck.name !== 'ores-review/gate') reasons.push('unexpected-gate-context');
     if (Number(gateCheck?.app?.id) !== gateAppId) reasons.push('gate-app-identity-mismatch');
