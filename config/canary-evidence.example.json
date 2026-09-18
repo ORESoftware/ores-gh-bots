@@ -1,0 +1,129 @@
+{
+  "schema_version": "ores.review-canary.v1",
+  "repository": "example-test/review-canary",
+  "pull_request": 7,
+  "app_ids": {
+    "openai": 101,
+    "claude": 102,
+    "gate": 103
+  },
+  "first_head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "second_head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "readiness": {
+    "status": 200,
+    "observed_at": "2026-09-01T12:00:00Z"
+  },
+  "webhook": {
+    "event": "pull_request",
+    "action": "synchronize",
+    "delivery_id": "example-delivery-2",
+    "observed_at": "2026-09-01T12:02:00Z"
+  },
+  "snapshots": {
+    "first_head_complete": {
+      "observed_at": "2026-09-01T12:01:00Z",
+      "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "checks": [
+        {
+          "name": "ores-review/openai",
+          "app_id": 101,
+          "external_id": "openai:example-test/review-canary#7@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "ores-review/claude",
+          "app_id": 102,
+          "external_id": "claude:example-test/review-canary#7@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "ores-review/gate",
+          "app_id": 103,
+          "external_id": "gate:example-test/review-canary#7@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    "second_head_pending": {
+      "observed_at": "2026-09-01T12:02:01Z",
+      "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "checks": [
+        {
+          "name": "ores-review/openai",
+          "app_id": 101,
+          "external_id": "openai:example-test/review-canary#7@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "status": "in_progress",
+          "conclusion": null
+        },
+        {
+          "name": "ores-review/gate",
+          "app_id": 103,
+          "external_id": "gate:example-test/review-canary#7@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "status": "in_progress",
+          "conclusion": null
+        }
+      ]
+    },
+    "second_head_complete": {
+      "observed_at": "2026-09-01T12:04:00Z",
+      "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "checks": [
+        {
+          "name": "ores-review/openai",
+          "app_id": 101,
+          "external_id": "openai:example-test/review-canary#7@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "ores-review/claude",
+          "app_id": 102,
+          "external_id": "claude:example-test/review-canary#7@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "ores-review/gate",
+          "app_id": 103,
+          "external_id": "gate:example-test/review-canary#7@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    }
+  },
+  "ruleset": {
+    "name": "ORES dual-AI review gate",
+    "enforcement": "evaluate",
+    "branch_mode": "all",
+    "targets": [
+      "refs/heads/**"
+    ],
+    "required_checks": [
+      {
+        "name": "ores-review/openai",
+        "app_id": 101
+      },
+      {
+        "name": "ores-review/claude",
+        "app_id": 102
+      },
+      {
+        "name": "ores-review/gate",
+        "app_id": 103
+      }
+    ]
+  },
+  "evidence_sha256": "7c382189dfa2e95a50f12257900b6723859fdd56899097f79e56b6aa494e0260"
+}

@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ORESoftware/ores-gh-bots/config/canary-evidence.schema.json",
+  "title": "ORES dual-review canary evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "repository",
+    "pull_request",
+    "app_ids",
+    "first_head_sha",
+    "second_head_sha",
+    "readiness",
+    "webhook",
+    "snapshots",
+    "ruleset"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "ores.review-canary.v1"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "pull_request": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "app_ids": {
+      "$ref": "#/$defs/appIds"
+    },
+    "first_head_sha": {
+      "$ref": "#/$defs/sha"
+    },
+    "second_head_sha": {
+      "$ref": "#/$defs/sha"
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "observed_at"],
+      "properties": {
+        "status": {
+          "const": 200
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "webhook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event", "action", "delivery_id", "observed_at"],
+      "properties": {
+        "event": {
+          "const": "pull_request"
+        },
+        "action": {
+          "const": "synchronize"
+        },
+        "delivery_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "snapshots": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["first_head_complete", "second_head_pending", "second_head_complete"],
+      "properties": {
+        "first_head_complete": {
+          "$ref": "#/$defs/snapshot"
+        },
+        "second_head_pending": {
+          "$ref": "#/$defs/snapshot"
+        },
+        "second_head_complete": {
+          "$ref": "#/$defs/snapshot"
+        }
+      }
+    },
+    "ruleset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "enforcement", "branch_mode", "targets", "required_checks"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "enforcement": {
+          "enum": ["evaluate", "active"]
+        },
+        "branch_mode": {
+          "enum": ["all", "protected"]
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^refs/heads/"
+          }
+        },
+        "required_checks": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/requiredCheck"
+          }
+        }
+      }
+    },
+    "evidence_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$"
+    },
+    "positiveId": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "appIds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["openai", "claude", "gate"],
+      "properties": {
+        "openai": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "claude": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "gate": {
+          "$ref": "#/$defs/positiveId"
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "app_id", "external_id", "head_sha", "status", "conclusion"],
+      "properties": {
+        "name": {
+          "enum": ["ores-review/openai", "ores-review/claude", "ores-review/gate"]
+        },
+        "app_id": {
+          "$ref": "#/$defs/positiveId"
+        },
+        "external_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "head_sha": {
+          "$ref": "#/$defs/sha"
+        },
+        "status": {
+          "enum": ["queued", "in_progress", "completed"]
+        },
+        "conclusion": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed_at", "head_sha", "checks"],
+      "properties": {
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "head_sha": {
+          "$ref": "#/$defs/sha"
+        },
+        "checks": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/check"
+          }
+        }
+      }
+    },
+    "requiredCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "app_id"],
+      "properties": {
+        "name": {
+          "enum": ["ores-review/openai", "ores-review/claude", "ores-review/gate"]
+        },
+        "app_id": {
+          "$ref": "#/$defs/positiveId"
+        }
+      }
+    }
+  }
+}
