@@ -3,14 +3,19 @@ import { CHECK_NAMES, OWN_CHECK_NAMES, SUPPORTED_PULL_REQUEST_ACTIONS } from './
 function prJob(payload, type = 'review', reason = 'webhook') {
   const pr = payload.pull_request;
   const repository = payload.repository;
-  if (!pr || !repository || !payload.installation?.id) return null;
+  const installationId = payload.installation?.id;
+  const owner = repository?.owner?.login;
+  const repo = repository?.name;
+  const prNumber = pr?.number;
+  const headSha = pr?.head?.sha;
+  if (!installationId || !owner || !repo || !prNumber || !headSha) return null;
   return {
     type,
-    installationId: payload.installation.id,
-    owner: repository.owner.login,
-    repo: repository.name,
-    prNumber: pr.number,
-    headSha: pr.head.sha,
+    installationId,
+    owner,
+    repo,
+    prNumber,
+    headSha,
     reason,
   };
 }
@@ -91,12 +96,10 @@ function isRoutableJob(job) {
 
 export function routeWebhookEvent({ event, payload }) {
   const action = payload?.action;
-
   const jobs = [
     ...(event === 'pull_request' ? pullRequestJobs(payload, action) : []),
     ...(event === 'check_run' ? checkRunJobs(payload, action) : []),
     ...(event === 'issue_comment' ? issueCommentJobs(payload, action) : []),
   ];
-
   return jobs.filter(isRoutableJob);
 }
