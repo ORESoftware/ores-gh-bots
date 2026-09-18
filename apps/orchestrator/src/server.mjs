@@ -16,6 +16,7 @@ function json(response, status, body) {
     'content-type': 'application/json; charset=utf-8',
     'content-length': data.length,
     'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
   });
   response.end(data);
 }
@@ -35,15 +36,41 @@ async function readBody(request, limit) {
   return Buffer.concat(chunks);
 }
 
+function singleHeader(value) {
+  if (Array.isArray(value)) return value.length === 1 ? value[0] : '';
+  return String(value ?? '');
+}
+
+function validEventHeader(value) {
+  return /^[a-z][a-z0-9_]{0,63}$/u.test(value);
+}
+
+function validDeliveryHeader(value) {
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value);
+}
+
 export function createWebhookServer({ config, queue, logger, metrics, readiness = () => true }) {
-  return createServer(async (request, response) => {
+  const server = createServer({
+    headersTimeout: config.server.headersTimeoutMs,
+    requestTimeout: config.server.requestTimeoutMs,
+    keepAliveTimeout: config.server.keepAliveTimeoutMs,
+    maxHeaderSize: config.server.maxHeaderBytes,
+  }, async (request, response) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
     try {
       if (request.method === 'GET' && url.pathname === '/healthz') return json(response, 200, { ok: true });
-      if (request.method === 'GET' && url.pathname === '/readyz') return json(response, readiness() ? 200 : 503, { ready: readiness() });
+      if (request.method === 'GET' && url.pathname === '/readyz') {
+        const ready = Boolean(readiness());
+        return json(response, ready ? 200 : 503, { ready });
+      }
       if (request.method === 'GET' && url.pathname === '/metrics') {
         const data = metrics.render();
-        response.writeHead(200, { 'content-type': 'text/plain; version=0.0.4', 'content-length': Buffer.byteLength(data) });
+        response.writeHead(200, {
+          'content-type': 'text/plain; version=0.0.4',
+          'content-length': Buffer.byteLength(data),
+          'cache-control': 'no-store',
+          'x-content-type-options': 'nosniff',
+        });
         return response.end(data);
       }
       if (request.method !== 'POST' || url.pathname !== config.server.webhookPath) {
@@ -51,10 +78,17 @@ export function createWebhookServer({ config, queue, logger, metrics, readiness 
       }
 
       const rawBody = await readBody(request, config.server.bodyLimitBytes);
-      const signature = request.headers['x-hub-signature-256'];
+      const signature = singleHeader(request.headers['x-hub-signature-256']);
       if (!verifyWebhookSignature({ secret: config.github.webhookSecret, body: rawBody, signature })) {
         metrics.increment('ores_webhooks_rejected_total', { reason: 'signature' });
         return json(response, 401, { error: 'invalid_signature' });
+      }
+
+      const event = singleHeader(request.headers['x-github-event']);
+      const deliveryId = singleHeader(request.headers['x-github-delivery']);
+      if (!validEventHeader(event) || !validDeliveryHeader(deliveryId)) {
+        metrics.increment('ores_webhooks_rejected_total', { reason: 'headers' });
+        return json(response, 400, { error: 'invalid_github_headers' });
       }
 
       let payload;
@@ -63,10 +97,10 @@ export function createWebhookServer({ config, queue, logger, metrics, readiness 
         metrics.increment('ores_webhooks_rejected_total', { reason: 'json' });
         return json(response, 400, { error: 'invalid_json' });
       }
-
-      const event = String(request.headers['x-github-event'] ?? '');
-      const deliveryId = String(request.headers['x-github-delivery'] ?? '');
-      if (!event || !deliveryId) return json(response, 400, { error: 'missing_github_headers' });
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        metrics.increment('ores_webhooks_rejected_total', { reason: 'payload' });
+        return json(response, 400, { error: 'invalid_payload' });
+      }
       if (event === 'ping') return json(response, 200, { ok: true, zen: payload.zen ?? null });
 
       const owner = payload.repository?.owner?.login ?? payload.organization?.login ?? payload.installation?.account?.login;
@@ -132,4 +166,8 @@ export function createWebhookServer({ config, queue, logger, metrics, readiness 
       return json(response, status, { error: status === 500 ? 'internal_error' : error.message });
     }
   });
+
+  server.maxHeadersCount = config.server.maxHeadersCount;
+  server.maxRequestsPerSocket = config.server.maxRequestsPerSocket;
+  return server;
 }
