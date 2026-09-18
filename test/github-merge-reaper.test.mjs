@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   countUnresolvedReviewThreads,
-  listPullRequestReviews,
+  listMergeReaperPullRequestReviews,
   mergePullRequestExact,
 } from '../packages/github/src/merge-reaper.mjs';
 
@@ -37,7 +37,7 @@ test('pull request reviews use bounded authenticated pagination', async () => {
       return [{ id: 1 }];
     },
   };
-  assert.deepEqual(await listPullRequestReviews(client, 'token', 'o', 'r', 3), [{ id: 1 }]);
+  assert.deepEqual(await listMergeReaperPullRequestReviews(client, 'token', 'o', 'r', 3), [{ id: 1 }]);
 });
 
 test('exact merge re-fetches mutable state and pins the merge request SHA', async () => {
@@ -128,4 +128,24 @@ test('GitHub merge refusal is surfaced without pretending success', async () => 
     /branch protection rejected merge/u,
   );
   assert.equal(count, 2);
+});
+
+
+test('exact merge helpers reject malformed repository coordinates and pagination bounds before network access', async () => {
+  const client = {
+    async request() { assert.fail('network must not be touched'); },
+    async paginate() { assert.fail('network must not be touched'); },
+  };
+  await assert.rejects(
+    mergePullRequestExact(client, 't', '../owner', 'repo', 1, { expectedHeadSha: 'a'.repeat(40) }),
+    /repository owner is invalid/u,
+  );
+  await assert.rejects(
+    mergePullRequestExact(client, 't', 'owner', 'repo', 0, { expectedHeadSha: 'a'.repeat(40) }),
+    /pull request number is invalid/u,
+  );
+  await assert.rejects(
+    countUnresolvedReviewThreads(client, 't', 'owner', 'repo', 1, { maxPages: 0 }),
+    /maxPages/u,
+  );
 });
