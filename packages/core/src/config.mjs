@@ -1,6 +1,9 @@
 import { DEFAULTS } from './constants.mjs';
 import { loadContractAdmissionPolicyFile } from './contract-policy.mjs';
 
+const REVIEWER_APPROVAL_MODES = new Set(['off', 'requested-gate-success']);
+const REVIEWER_LOGIN_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/u;
+
 function optionalString(value) {
   const text = String(value ?? '').trim();
   return text || null;
@@ -144,6 +147,12 @@ export function loadConfig(env = process.env) {
       commentMode: optionalString(env.REVIEW_COMMENT_MODE) ?? 'summary',
       postPullRequestReview: boolean(env.POST_PULL_REQUEST_REVIEW, false),
     },
+    reviewer: {
+      login: optionalString(env.REVIEWER_LOGIN) ?? 'the1mills',
+      token: optionalString(env.GITHUB_REVIEWER_TOKEN),
+      approvalMode: optionalString(env.REVIEWER_APPROVAL_MODE) ?? 'off',
+      maxItems: integer(env.REVIEWER_MAX_ITEMS, 100, { min: 1, max: 100 }),
+    },
     contractAdmission: {
       policyPath: contractAdmissionPolicyPath,
       policy: contractAdmissionPolicy,
@@ -195,6 +204,9 @@ function missingRuntimeConfig(config, { webhook, providers }) {
     config.gha.mode === 'offload' && !config.gha.dispatchToken && !config.apps.actions.privateKey
       ? 'ACTIONS_APP_PRIVATE_KEY'
       : null,
+    config.reviewer?.approvalMode === 'requested-gate-success' && !config.reviewer?.token
+      ? 'GITHUB_REVIEWER_TOKEN'
+      : null,
   ].filter(Boolean);
 }
 
@@ -221,6 +233,14 @@ export function validateRuntimeConfig(config, { webhook = true, providers = true
       const [[previousRole, appId], [currentRole]] = [duplicate.previous, duplicate.current];
       throw new Error(`GitHub App identities must be distinct: ${previousRole} and ${currentRole} both use App ID ${appId}`);
     }
+  }
+
+  if (!REVIEWER_APPROVAL_MODES.has(config.reviewer?.approvalMode)) {
+    throw new Error(`Unsupported REVIEWER_APPROVAL_MODE: ${config.reviewer?.approvalMode}`);
+  }
+  const reviewerLogin = String(config.reviewer?.login ?? '');
+  if (!REVIEWER_LOGIN_PATTERN.test(reviewerLogin) || reviewerLogin.endsWith('-') || reviewerLogin.includes('--')) {
+    throw new Error(`Invalid REVIEWER_LOGIN: ${reviewerLogin}`);
   }
 
   const unrequiredContext = Object.keys(config.review.requiredCiAppIds ?? {})
