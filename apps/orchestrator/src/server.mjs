@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import {
+  DEFAULTS,
   ownerIsAllowed,
   redactText,
   routeWebhookEvent,
@@ -50,11 +51,22 @@ function validDeliveryHeader(value) {
 }
 
 export function createWebhookServer({ config, queue, logger, metrics, readiness = () => true }) {
+  const serverConfig = {
+    webhookPath: '/webhooks/github',
+    bodyLimitBytes: DEFAULTS.bodyLimitBytes,
+    headersTimeoutMs: DEFAULTS.headersTimeoutMs,
+    requestTimeoutMs: DEFAULTS.requestTimeoutMs,
+    keepAliveTimeoutMs: DEFAULTS.keepAliveTimeoutMs,
+    maxHeaderBytes: DEFAULTS.maxHeaderBytes,
+    maxHeadersCount: DEFAULTS.maxHeadersCount,
+    maxRequestsPerSocket: DEFAULTS.maxRequestsPerSocket,
+    ...(config.server ?? {}),
+  };
   const server = createServer({
-    headersTimeout: config.server.headersTimeoutMs,
-    requestTimeout: config.server.requestTimeoutMs,
-    keepAliveTimeout: config.server.keepAliveTimeoutMs,
-    maxHeaderSize: config.server.maxHeaderBytes,
+    headersTimeout: serverConfig.headersTimeoutMs,
+    requestTimeout: serverConfig.requestTimeoutMs,
+    keepAliveTimeout: serverConfig.keepAliveTimeoutMs,
+    maxHeaderSize: serverConfig.maxHeaderBytes,
   }, async (request, response) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
     try {
@@ -73,11 +85,11 @@ export function createWebhookServer({ config, queue, logger, metrics, readiness 
         });
         return response.end(data);
       }
-      if (request.method !== 'POST' || url.pathname !== config.server.webhookPath) {
+      if (request.method !== 'POST' || url.pathname !== serverConfig.webhookPath) {
         return json(response, 404, { error: 'not_found' });
       }
 
-      const rawBody = await readBody(request, config.server.bodyLimitBytes);
+      const rawBody = await readBody(request, serverConfig.bodyLimitBytes);
       const signature = singleHeader(request.headers['x-hub-signature-256']);
       if (!verifyWebhookSignature({ secret: config.github.webhookSecret, body: rawBody, signature })) {
         metrics.increment('ores_webhooks_rejected_total', { reason: 'signature' });
@@ -167,7 +179,7 @@ export function createWebhookServer({ config, queue, logger, metrics, readiness 
     }
   });
 
-  server.maxHeadersCount = config.server.maxHeadersCount;
-  server.maxRequestsPerSocket = config.server.maxRequestsPerSocket;
+  server.maxHeadersCount = serverConfig.maxHeadersCount;
+  server.maxRequestsPerSocket = serverConfig.maxRequestsPerSocket;
   return server;
 }
