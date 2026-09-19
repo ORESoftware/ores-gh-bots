@@ -66,6 +66,52 @@ function evaluateProjectionAdmission(kind, candidates, projectionContext) {
   return { projectionKind: kind, state: 'success', reason: 'exact Contract IR evidence admitted' };
 }
 
+function evaluateRequiredCiContext(context, item, expectedAppId) {
+  if (!item) return { context, state: 'pending', reason: 'missing' };
+
+  // App-bound contexts are authenticated evidence families, not generic GitHub
+  // branch-protection contexts. They must be a real Check Run from the expected
+  // App and must carry GitHub's raw terminal `completed/success` state. Do not
+  // allow generic normalization of neutral/skipped or a same-name PAT status to
+  // satisfy this stronger contract.
+  if (expectedAppId !== null) {
+    if (item.source !== 'check_run') {
+      return { context, state: 'failure', reason: 'App-bound CI requires a GitHub Check Run' };
+    }
+    if (Number(item.appId) !== Number(expectedAppId)) {
+      return {
+        context,
+        state: 'failure',
+        reason: `app identity mismatch: expected ${expectedAppId}, received ${item.appId ?? 'none'}`,
+      };
+    }
+    if (item.rawStatus !== 'completed') {
+      if (['queued', 'in_progress', 'pending', 'requested', 'waiting', 'expected'].includes(item.rawStatus)) {
+        return { context, state: 'pending', reason: item.rawStatus };
+      }
+      return {
+        context,
+        state: 'failure',
+        reason: `invalid raw check status: ${item.rawStatus ?? 'missing'}`,
+      };
+    }
+    if (item.rawConclusion !== 'success') {
+      return {
+        context,
+        state: 'failure',
+        reason: `raw check conclusion is ${item.rawConclusion ?? 'missing'}, not success`,
+      };
+    }
+    return { context, state: 'success', reason: 'App-owned completed/success Check Run' };
+  }
+
+  if (['queued', 'in_progress', 'pending', 'requested', 'waiting', 'expected'].includes(item.state)) {
+    return { context, state: 'pending', reason: item.state };
+  }
+  if (item.state === 'success') return { context, state: 'success', reason: 'success' };
+  return { context, state: 'failure', reason: item.state };
+}
+
 export function evaluateGate({
   reviews,
   ci = [],
@@ -86,23 +132,11 @@ export function evaluateGate({
 
   const latestByContext = new Map();
   for (const item of ci) latestByContext.set(item.context, item);
-  const ciStates = requiredCiContexts.map((context) => {
-    const item = latestByContext.get(context);
-    if (!item) return { context, state: 'pending', reason: 'missing' };
-    const expectedAppId = requiredCiAppIds[context] ?? null;
-    if (expectedAppId !== null && Number(item.appId) !== Number(expectedAppId)) {
-      return {
-        context,
-        state: 'failure',
-        reason: `app identity mismatch: expected ${expectedAppId}, received ${item.appId ?? 'none'}`,
-      };
-    }
-    if (['queued', 'in_progress', 'pending', 'requested', 'waiting', 'expected'].includes(item.state)) {
-      return { context, state: 'pending', reason: item.state };
-    }
-    if (item.state === 'success') return { context, state: 'success', reason: 'success' };
-    return { context, state: 'failure', reason: item.state };
-  });
+  const ciStates = requiredCiContexts.map((context) => evaluateRequiredCiContext(
+    context,
+    latestByContext.get(context),
+    requiredCiAppIds[context] ?? null,
+  ));
 
   const requiredKinds = Array.isArray(requiredProjectionKinds) ? requiredProjectionKinds : [null];
   const duplicateRequiredKinds = new Set();
