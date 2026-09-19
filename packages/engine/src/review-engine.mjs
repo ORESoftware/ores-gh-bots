@@ -197,20 +197,27 @@ export class ReviewEngine {
     return { ...reviews, ...Object.fromEntries(consulted) };
   }
 
-  async #finishProvider({ opened, job, pullRequest, result }) {
-    const { provider, token, url, checkRunId } = opened;
-    const target = { client: this.client, token, owner: job.owner, repo: job.repo, checkRunId, name: CHECK_NAMES[provider], detailsUrl: url };
-    const { consult: _consult, ...stored } = result;
+  #recordProviderError({ provider, job, pullRequest, error, checkRunId = null }) {
+    const summary = errorSummary(error);
     this.queue.recordReview({
       owner: job.owner,
       repo: job.repo,
       prNumber: job.prNumber,
       headSha: pullRequest.head.sha,
       provider,
-      ...(result.error ? { error: result.error } : { result: stored }),
+      error: summary,
       checkRunId,
     });
+    return summary;
+  }
+
+  async #finishProvider({ opened, job, pullRequest, result }) {
+    const { provider, token, url, checkRunId } = opened;
+    const target = { client: this.client, token, owner: job.owner, repo: job.repo, checkRunId, name: CHECK_NAMES[provider], detailsUrl: url };
+    const { consult: _consult, ...stored } = result;
+
     if (result.error) {
+      this.#recordProviderError({ provider, job, pullRequest, error: result.error, checkRunId });
       await completeFailedCheck({ ...target, summary: result.error }).catch((checkError) => this.logger.error('failed to publish provider failure check', {
         provider,
         error: errorSummary(checkError),
@@ -218,20 +225,48 @@ export class ReviewEngine {
       this.metrics?.increment('ores_provider_errors_total', { provider });
       return { error: result.error, checkRunId };
     }
-    await completeReviewCheck({ ...target, review: stored });
+
+    // Success becomes durable/countable only after the exact provider Check Run
+    // has reached its terminal success state. If publication fails, overwrite
+    // any older same-provider/same-head success with an error before the
+    // aggregate gate can read the queue.
+    try {
+      await completeReviewCheck({ ...target, review: stored });
+    } catch (error) {
+      const summary = this.#recordProviderError({ provider, job, pullRequest, error, checkRunId });
+      await completeFailedCheck({ ...target, summary: `provider review publication failed: ${summary}` }).catch((checkError) => this.logger.error('failed to publish provider failure check after success publication error', {
+        provider,
+        error: errorSummary(checkError),
+      }));
+      throw error;
+    }
+
+    this.queue.recordReview({
+      owner: job.owner,
+      repo: job.repo,
+      prNumber: job.prNumber,
+      headSha: pullRequest.head.sha,
+      provider,
+      result: stored,
+      checkRunId,
+    });
     this.metrics?.increment('ores_provider_reviews_total', { provider, verdict: result.verdict });
     return { ...result, checkRunId };
   }
 
-  // A provider whose check cannot be opened or completed fails closed without
-  // taking the other provider's result down with it.
-  async #settleProvider(provider, work) {
+  // A provider whose check cannot be opened, completed, or persisted fails
+  // closed without taking the other provider's result down with it. When
+  // `onError` is supplied, failure invalidation is part of the trust boundary:
+  // if it cannot be persisted, abort the whole review before gate publication.
+  async #settleProvider(provider, work, onError = null) {
     try {
       return await work();
     } catch (error) {
-      this.logger.error('provider review publication failed', { provider, error: errorSummary(error) });
+      const summary = errorSummary(error);
+      if (onError) onError(summary);
+      this.logger.error('provider review publication failed', { provider, error: summary });
       this.metrics?.increment('ores_provider_errors_total', { provider });
-      return { error: errorSummary(error), checkRunId: null };
+      return { error: summary, checkRunId: null };
     }
   }
 
@@ -303,9 +338,17 @@ export class ReviewEngine {
     const files = await listPullRequestFiles(this.client, access.token, job.owner, job.repo, job.prNumber);
     const context = buildReviewContext({ pullRequest, files, reviewConfig: this.config.review });
     const providers = ['openai', 'claude'];
+    const invalidateProvider = (provider, checkRunId = null) => (error) => this.#recordProviderError({
+      provider,
+      job,
+      pullRequest,
+      error,
+      checkRunId,
+    });
     const opened = await Promise.all(providers.map((provider) => this.#settleProvider(
       provider,
       () => this.#openProviderCheck({ provider, job, pullRequest }),
+      invalidateProvider(provider),
     )));
     const independent = await Promise.all(opened.map((check) => (
       check.error ? check : this.#callProvider({ provider: check.provider, context })
@@ -318,6 +361,7 @@ export class ReviewEngine {
       check.error ? check : this.#settleProvider(
         providers[index],
         () => this.#finishProvider({ opened: check, job, pullRequest, result: final[providers[index]] }),
+        invalidateProvider(providers[index], check.checkRunId ?? null),
       )
     )));
 
