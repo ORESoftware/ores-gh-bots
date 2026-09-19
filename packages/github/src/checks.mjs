@@ -199,6 +199,9 @@ export async function getCiSnapshot(client, token, owner, repo, headSha) {
       id: check.id,
       context: check.name,
       state: normalizeCheckState(check),
+      source: 'check_run',
+      rawStatus: check.status ?? null,
+      rawConclusion: check.conclusion ?? null,
       appId: check.app?.id ?? null,
       url: check.html_url,
     });
@@ -209,6 +212,9 @@ export async function getCiSnapshot(client, token, owner, repo, headSha) {
       id: status.id,
       context: status.context,
       state: status.state,
+      source: 'commit_status',
+      rawStatus: null,
+      rawConclusion: null,
       appId: null,
       url: status.target_url,
     });
