@@ -8,6 +8,8 @@ export * from './diff.mjs';
 export * from './admission.mjs';
 export * from './gate.mjs';
 export * from './events.mjs';
+export * from './agent-tags.mjs';
+export * from './peer-consult.mjs';
 export * from './log.mjs';
 export * from './metrics.mjs';
 export * from './contract-admission.mjs';

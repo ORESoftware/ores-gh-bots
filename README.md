@@ -17,6 +17,7 @@ A new commit produces a new SHA and therefore a new set of checks. Results for a
 - HMAC-SHA256 verification of GitHub webhook deliveries.
 - Event routing for opened, reopened, synchronized, edited, and ready-for-review pull requests.
 - Manual authorized `/ores-review` commands and check-run re-requests.
+- Agent-to-agent review requests (`ores-agent-tag` markers, `agent-tag:<family>` labels), exact-head `ores-agent-review` attestations, and an opt-in peer consult in which Claude and ChatGPT answer each other's findings. See `docs/AGENT_TAGGING.md`.
 - Distinct optional GitHub App identities for OpenAI, Claude, and the aggregate gate.
 - OpenAI Responses API structured output and Anthropic Messages API forced tool output.
 - Explicit prompt-injection boundaries: repository content, issue text, commit messages, and diffs are always untrusted data.

@@ -1,5 +1,6 @@
 import { DEFAULTS } from './constants.mjs';
 import { loadContractAdmissionPolicyFile } from './contract-policy.mjs';
+import { peerConsultMode } from './peer-consult.mjs';
 
 const REVIEWER_APPROVAL_MODES = new Set(['off', 'requested-gate-success']);
 const REVIEWER_LOGIN_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/u;
@@ -100,6 +101,11 @@ export function loadConfig(env = process.env) {
   if (server.headersTimeoutMs > server.requestTimeoutMs) {
     throw new Error('HTTP_HEADERS_TIMEOUT_MS must not exceed HTTP_REQUEST_TIMEOUT_MS');
   }
+  // Attestations are carried by the head-anchored PR review; enabling them
+  // without that review would silently publish nothing.
+  if (boolean(env.REVIEW_AGENT_ATTESTATIONS, false) && !boolean(env.POST_PULL_REQUEST_REVIEW, false)) {
+    throw new Error('REVIEW_AGENT_ATTESTATIONS=true requires POST_PULL_REQUEST_REVIEW=true');
+  }
 
   return {
     server,
@@ -146,6 +152,8 @@ export function loadConfig(env = process.env) {
       requiredCiAppIds: requiredCiAppIds(env.REQUIRED_CI_APP_IDS),
       commentMode: optionalString(env.REVIEW_COMMENT_MODE) ?? 'summary',
       postPullRequestReview: boolean(env.POST_PULL_REQUEST_REVIEW, false),
+      agentAttestations: boolean(env.REVIEW_AGENT_ATTESTATIONS, false),
+      peerConsult: peerConsultMode(env.REVIEW_PEER_CONSULT),
     },
     reviewer: {
       login: optionalString(env.REVIEWER_LOGIN) ?? 'the1mills',
