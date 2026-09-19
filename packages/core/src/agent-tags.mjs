@@ -13,8 +13,20 @@ import { PROVIDERS } from './constants.mjs';
 export const AGENT_TAG_LABEL_PREFIX = 'agent-tag:';
 
 const MARKER_PATTERN = /<!-- (ores-agent-(tag|review|author) v1 [^>]{1,512}?) ?-->/g;
-const FIELD_PATTERN = /^[a-z][a-z0-9_-]{0,31}=[A-Za-z0-9._:/#@-]{1,128}$/;
+const FIELD_PATTERN = /^([a-z]{1,16})=(\S{1,128})$/;
 const MAX_MARKERS = 16;
+
+const FAMILY = /^[a-z][a-z0-9-]{0,31}$/;
+const SESSION = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/;
+const HEAD_SHA = /^[0-9a-f]{40}$/;
+
+// The grammar is closed: each marker kind carries exactly these keys, once
+// each, and every value must match its form. Anything else is not a marker.
+const MARKER_SCHEMAS = Object.freeze({
+  tag: Object.freeze({ to: FAMILY, from: FAMILY, session: SESSION, kind: /^(?:review|merge|fix)$/, head: HEAD_SHA }),
+  review: Object.freeze({ agent: FAMILY, session: SESSION, head: HEAD_SHA, verdict: /^(?:approve|request-changes)$/ }),
+  author: Object.freeze({ agent: FAMILY, session: SESSION }),
+});
 
 // Families whose review this service can perform, keyed to its providers.
 const FAMILY_PROVIDERS = Object.freeze({
@@ -28,25 +40,28 @@ const FAMILY_PROVIDERS = Object.freeze({
 const PROVIDER_FAMILIES = Object.freeze({ openai: 'codex', claude: 'claude' });
 
 export function providerForFamily(family) {
-  return FAMILY_PROVIDERS[String(family ?? '').toLowerCase()] ?? null;
+  const name = String(family ?? '').toLowerCase();
+  return Object.hasOwn(FAMILY_PROVIDERS, name) ? FAMILY_PROVIDERS[name] : null;
 }
 
 export function familyForProvider(provider) {
-  return PROVIDER_FAMILIES[provider] ?? null;
+  return Object.hasOwn(PROVIDER_FAMILIES, provider) ? PROVIDER_FAMILIES[provider] : null;
 }
 
-function parseFields(words) {
-  if (!words.every((word) => FIELD_PATTERN.test(word))) return null;
-  return Object.fromEntries(words.map((word) => {
-    const index = word.indexOf('=');
-    return [word.slice(0, index), word.slice(index + 1).toLowerCase()];
-  }));
+function parseFields(kind, words) {
+  const schema = MARKER_SCHEMAS[kind];
+  const pairs = words.map((word) => FIELD_PATTERN.exec(word));
+  if (pairs.some((pair) => !pair) || pairs.length !== Object.keys(schema).length) return null;
+  const keys = pairs.map((pair) => pair[1]);
+  if (new Set(keys).size !== keys.length) return null;
+  if (!pairs.every(([, key, value]) => Object.hasOwn(schema, key) && schema[key].test(value))) return null;
+  return Object.fromEntries(pairs.map(([, key, value]) => [key, value]));
 }
 
 export function parseAgentMarkers(body) {
   const matches = [...String(body ?? '').matchAll(MARKER_PATTERN)].slice(0, MAX_MARKERS);
   return matches.flatMap((match) => {
-    const fields = parseFields(match[1].split(/\s+/).slice(2));
+    const fields = parseFields(match[2], match[1].split(' ').slice(2));
     return fields ? [{ kind: match[2], fields }] : [];
   });
 }

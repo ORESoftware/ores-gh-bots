@@ -101,6 +101,11 @@ export function loadConfig(env = process.env) {
   if (server.headersTimeoutMs > server.requestTimeoutMs) {
     throw new Error('HTTP_HEADERS_TIMEOUT_MS must not exceed HTTP_REQUEST_TIMEOUT_MS');
   }
+  // Attestations are carried by the head-anchored PR review; enabling them
+  // without that review would silently publish nothing.
+  if (boolean(env.REVIEW_AGENT_ATTESTATIONS, false) && !boolean(env.POST_PULL_REQUEST_REVIEW, false)) {
+    throw new Error('REVIEW_AGENT_ATTESTATIONS=true requires POST_PULL_REQUEST_REVIEW=true');
+  }
 
   return {
     server,

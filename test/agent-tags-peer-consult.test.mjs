@@ -33,12 +33,37 @@ test('tag markers addressed to a hosted family select that provider', () => {
   assert.deepEqual(reviewTagProviders(tag(`to=codex from=claude session=s1 kind=merge head=${HEAD}`)), []);
 });
 
-test('marker parsing is closed: other versions, malformed fields, and review markers do not request a review', () => {
-  assert.deepEqual(parseAgentMarkers('<!-- ores-agent-tag v2 to=codex kind=review -->'), []);
-  assert.deepEqual(parseAgentMarkers('<!-- ores-agent-tag v1 to=codex kind=review $(rm) -->'), []);
-  assert.deepEqual(parseAgentMarkers(`<!-- ores-agent-tag v1 to=${'x'.repeat(600)} kind=review -->`), []);
-  assert.deepEqual(reviewTagProviders(`<!-- ores-agent-review v1 agent=codex session=s head=${HEAD} verdict=approve -->`), []);
-  assert.equal(parseAgentMarkers('<!-- ores-agent-tag v1 to=codex kind=review -->'.repeat(40)).length, 16);
+const FULL_TAG = `to=codex from=claude session=s1 kind=review head=${HEAD}`;
+const marker = (kind, fields) => `<!-- ores-agent-${kind} v1 ${fields} -->`;
+
+test('the marker grammar is closed: exact keys, once each, every value in form', () => {
+  assert.equal(parseAgentMarkers(marker('tag', FULL_TAG)).length, 1);
+  const rejected = {
+    'other version': '<!-- ores-agent-tag v2 ' + FULL_TAG + ' -->',
+    'missing from/session/head': marker('tag', 'to=codex kind=review'),
+    'missing head only': marker('tag', 'to=codex from=claude session=s1 kind=review'),
+    'unknown extra key': marker('tag', `${FULL_TAG} priority=high`),
+    'duplicate key': marker('tag', `${FULL_TAG} to=claude`),
+    'duplicate key replacing a required one': marker('tag', `to=codex to=claude session=s1 kind=review head=${HEAD}`),
+    'short head': marker('tag', 'to=codex from=claude session=s1 kind=review head=954fd98'),
+    'uppercase head': marker('tag', `to=codex from=claude session=s1 kind=review head=${HEAD.toUpperCase()}`),
+    'non-hex head': marker('tag', `to=codex from=claude session=s1 kind=review head=${'g'.repeat(40)}`),
+    'unknown kind value': marker('tag', `to=codex from=claude session=s1 kind=approve head=${HEAD}`),
+    'shell text in a value': marker('tag', `to=codex from=claude session=$(rm) kind=review head=${HEAD}`),
+    'family with a path': marker('tag', `to=codex/../x from=claude session=s1 kind=review head=${HEAD}`),
+    'oversized session': marker('tag', `to=codex from=claude session=${'s'.repeat(97)} kind=review head=${HEAD}`),
+    'oversized marker': marker('tag', `to=${'x'.repeat(600)} kind=review`),
+    'double space between fields': marker('tag', FULL_TAG.replace(' from=', '  from=')),
+    'prototype key': marker('author', 'agent=claude __proto__=x'),
+    'review with a tag key': marker('review', `agent=codex session=s head=${HEAD} verdict=approve to=claude`),
+    'review verdict outside the enum': marker('review', `agent=codex session=s head=${HEAD} verdict=comment`),
+    'author with a head': marker('author', `agent=claude session=s head=${HEAD}`),
+  };
+  for (const [name, text] of Object.entries(rejected)) assert.deepEqual(parseAgentMarkers(text), [], name);
+  assert.deepEqual(reviewTagProviders(marker('tag', 'to=codex kind=review')), [], 'an underspecified tag routes nothing');
+  assert.deepEqual(reviewTagProviders(marker('review', `agent=codex session=s head=${HEAD} verdict=approve`)), []);
+  assert.equal(parseAgentMarkers(marker('tag', FULL_TAG).repeat(40)).length, 16);
+  assert.equal(parseAgentMarkers(marker('author', 'agent=claude session=182608de-f3d4-4aa6')).length, 1);
 });
 
 test('agent-tag labels map to providers', () => {
@@ -127,7 +152,7 @@ function pullRequest() {
   };
 }
 
-function fakeClient() {
+function fakeClient({ failReviews = false } = {}) {
   let checkId = 100;
   const calls = [];
   return {
@@ -144,7 +169,10 @@ function fakeClient() {
       if (method === 'PATCH' && path.includes('/check-runs/')) return { data: { id: Number(path.split('/').at(-1)), ...options.body } };
       if (method === 'GET' && path.includes('/check-runs?filter=latest')) return { data: { check_runs: [] } };
       if (method === 'GET' && path.endsWith('/status')) return { data: { statuses: [] } };
-      if (method === 'POST' && path.endsWith('/reviews')) return { data: { id: 1 } };
+      if (method === 'POST' && path.endsWith('/reviews')) {
+        if (failReviews) throw Object.assign(new Error('review rejected'), { status: 502 });
+        return { data: { id: 1 } };
+      }
       throw new Error(`Unexpected request: ${method} ${path}`);
     },
   };
@@ -154,9 +182,9 @@ const json = (body) => Promise.resolve(new Response(JSON.stringify(body), { stat
 const openaiReply = (review) => json({ status: 'completed', output_text: JSON.stringify(review) });
 const claudeReply = (review) => json({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_code_review', input: review }] });
 
-function engineWith({ env, fetchImpl }) {
+function engineWith({ env, fetchImpl, failReviews = false }) {
   const queue = new SqliteQueue({ path: ':memory:' });
-  const client = fakeClient();
+  const client = fakeClient({ failReviews });
   const config = loadConfig({
     OWNER_ALLOWLIST: 'O', GITHUB_APP_ID: '1', GITHUB_APP_PRIVATE_KEY: 'unused-in-mock',
     OPENAI_API_KEY: 'test-openai-key-that-is-not-a-real-secret', OPENAI_BASE_URL: 'https://openai.test',
@@ -251,5 +279,61 @@ test('attestations are published in the head-anchored review only when enabled',
   ]);
   const plain = await posted({ POST_PULL_REQUEST_REVIEW: 'true' });
   assert.deepEqual(parseAgentMarkers(plain.body), []);
-  assert.equal(await posted({ REVIEW_AGENT_ATTESTATIONS: 'true' }), undefined);
+  await assert.rejects(() => posted({ REVIEW_AGENT_ATTESTATIONS: 'true' }), /requires POST_PULL_REQUEST_REVIEW=true/);
+  await assert.rejects(() => posted({ REVIEW_AGENT_ATTESTATIONS: 'true', POST_PULL_REQUEST_REVIEW: 'false' }), /requires POST_PULL_REQUEST_REVIEW=true/);
+});
+
+const checkCalls = (client, name) => ({
+  created: client.calls.filter((call) => call.method === 'POST' && call.path.endsWith('/check-runs') && call.options.body.name === name),
+  completed: client.calls.filter((call) => call.method === 'PATCH' && call.options.body.name === name && call.options.body.status === 'completed'),
+});
+
+test('a consult publishes exactly one check run per provider and no provisional success', async () => {
+  let openaiCalls = 0;
+  const fetchImpl = (url) => {
+    if (String(url).includes('anthropic')) return claudeReply(blocked);
+    openaiCalls += 1;
+    return openaiReply(openaiCalls === 1 ? approved : blocked);
+  };
+  const { queue, client, engine } = engineWith({ env: { REVIEW_PEER_CONSULT: 'disagreement' }, fetchImpl });
+  try {
+    const result = await engine.process(job);
+    assert.equal(openaiCalls, 2);
+    for (const name of ['ores-review/openai', 'ores-review/claude']) {
+      const { created, completed } = checkCalls(client, name);
+      assert.equal(created.length, 1, `${name} is created once`);
+      assert.equal(completed.length, 1, `${name} is completed once`);
+      assert.equal(completed[0].options.body.conclusion, 'failure', `${name} never shows the first-pass approval`);
+    }
+    const stored = queue.getReviews({ owner: 'O', repo: 'R', prNumber: 1, headSha: HEAD });
+    assert.equal(stored.openai.checkRunId, result.openai.checkRunId);
+    assert.equal('consult' in stored.openai, false);
+  } finally { queue.close(); }
+});
+
+test('with attestations enabled a failed publication leaves the gate incomplete and fails the job for retry', async () => {
+  const fetchImpl = (url) => (String(url).includes('anthropic') ? claudeReply(approved) : openaiReply(approved));
+  const env = { POST_PULL_REQUEST_REVIEW: 'true', REVIEW_AGENT_ATTESTATIONS: 'true' };
+  const broken = engineWith({ env, fetchImpl, failReviews: true });
+  try {
+    await assert.rejects(() => broken.engine.process(job), /attestation review publication failed/);
+    assert.equal(checkCalls(broken.client, 'ores-review/gate').completed.length, 0, 'the gate is never published green without its attestation');
+  } finally { broken.queue.close(); }
+
+  const tolerant = engineWith({ env: { POST_PULL_REQUEST_REVIEW: 'true' }, fetchImpl, failReviews: true });
+  try {
+    const result = await tolerant.engine.process(job);
+    assert.equal(result.gate.conclusion, 'success', 'a plain summary review stays best-effort');
+  } finally { tolerant.queue.close(); }
+});
+
+test('with attestations enabled the review is published before the gate check completes', async () => {
+  const fetchImpl = (url) => (String(url).includes('anthropic') ? claudeReply(approved) : openaiReply(approved));
+  const { queue, client, engine } = engineWith({ env: { POST_PULL_REQUEST_REVIEW: 'true', REVIEW_AGENT_ATTESTATIONS: 'true' }, fetchImpl });
+  try {
+    await engine.process(job);
+    const reviewAt = client.calls.findIndex((call) => call.method === 'POST' && call.path.endsWith('/reviews'));
+    const gateDoneAt = client.calls.findIndex((call) => call.method === 'PATCH' && call.options.body.name === 'ores-review/gate' && call.options.body.status === 'completed');
+    assert.ok(reviewAt >= 0 && gateDoneAt > reviewAt);
+  } finally { queue.close(); }
 });

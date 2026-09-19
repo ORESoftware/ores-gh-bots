@@ -124,23 +124,6 @@ export class ReviewEngine {
     }
   }
 
-  // Each provider that approved is invoked again with its peer's review. A
-  // failed consult keeps a failed check: #runProvider has already recorded it.
-  async #consultPeers({ job, pullRequest, context, reviews }) {
-    const plan = peerConsultPlan({ mode: this.config.review.peerConsult, reviews });
-    const consulted = await Promise.all(plan.map(async ({ provider, peer }) => {
-      this.metrics?.increment('ores_peer_consults_total', { provider, peer });
-      const result = await this.#runProvider({
-        provider,
-        job,
-        pullRequest,
-        context: { ...context, peerReview: peerReviewForPrompt(peer, reviews[peer]) },
-      });
-      return [provider, result.error ? result : applyConsultResult({ consulted: result })];
-    }));
-    return { ...reviews, ...Object.fromEntries(consulted) };
-  }
-
   async #dispatchOffload(job, pullRequest) {
     let dispatchToken = this.config.gha.dispatchToken;
     if (!dispatchToken) {
@@ -168,9 +151,11 @@ export class ReviewEngine {
     return { offloaded: true, headSha: pullRequest.head.sha };
   }
 
-  async #runProvider({ provider, job, pullRequest, context }) {
+  // One required check per provider and head: the check opens before the
+  // independent call and completes once, after any peer consult, so no
+  // provisional success is ever published for the required context.
+  async #openProviderCheck({ provider, job, pullRequest }) {
     const role = provider === 'openai' ? 'openai' : 'claude';
-    const checkName = CHECK_NAMES[provider];
     const access = await this.auth.repoToken(role, job.owner, job.repo, job.installationId);
     const url = detailsUrl(this.config, job.owner, job.repo, job.prNumber, pullRequest.head.sha);
     const check = await ensureInProgressCheck({
@@ -179,63 +164,74 @@ export class ReviewEngine {
       owner: job.owner,
       repo: job.repo,
       headSha: pullRequest.head.sha,
-      name: checkName,
+      name: CHECK_NAMES[provider],
       detailsUrl: url,
       externalId: `${provider}:${job.owner}/${job.repo}#${job.prNumber}@${pullRequest.head.sha}`,
       summary: `${provider} is reviewing the exact pull-request head SHA ${pullRequest.head.sha}.`,
     });
+    return { provider, token: access.token, url, checkRunId: check.id };
+  }
 
+  async #callProvider({ provider, context }) {
     try {
-      const result = provider === 'openai'
+      return provider === 'openai'
         ? await reviewWithOpenAI({ config: this.config.providers.openai, context, fetchImpl: this.fetchImpl })
         : await reviewWithAnthropic({ config: this.config.providers.anthropic, context, fetchImpl: this.fetchImpl });
-      this.queue.recordReview({
-        owner: job.owner,
-        repo: job.repo,
-        prNumber: job.prNumber,
-        headSha: pullRequest.head.sha,
-        provider,
-        result,
-        checkRunId: check.id,
-      });
-      await completeReviewCheck({
-        client: this.client,
-        token: access.token,
-        owner: job.owner,
-        repo: job.repo,
-        checkRunId: check.id,
-        name: checkName,
-        review: result,
-        detailsUrl: url,
-      });
-      this.metrics?.increment('ores_provider_reviews_total', { provider, verdict: result.verdict });
-      return { ...result, checkRunId: check.id };
     } catch (error) {
-      const summary = errorSummary(error);
-      this.queue.recordReview({
-        owner: job.owner,
-        repo: job.repo,
-        prNumber: job.prNumber,
-        headSha: pullRequest.head.sha,
+      return { error: errorSummary(error) };
+    }
+  }
+
+  // Each provider that approved is invoked again with its peer's review. The
+  // consult result, including a consult failure, replaces the approval.
+  async #consultPeers({ context, reviews }) {
+    const plan = peerConsultPlan({ mode: this.config.review.peerConsult, reviews });
+    const consulted = await Promise.all(plan.map(async ({ provider, peer }) => {
+      this.metrics?.increment('ores_peer_consults_total', { provider, peer });
+      const result = await this.#callProvider({
         provider,
-        error: summary,
-        checkRunId: check.id,
+        context: { ...context, peerReview: peerReviewForPrompt(peer, reviews[peer]) },
       });
-      await completeFailedCheck({
-        client: this.client,
-        token: access.token,
-        owner: job.owner,
-        repo: job.repo,
-        checkRunId: check.id,
-        name: checkName,
-        summary,
-        detailsUrl: url,
-      }).catch((checkError) => this.logger.error('failed to publish provider failure check', {
+      return [provider, result.error ? result : applyConsultResult({ consulted: result })];
+    }));
+    return { ...reviews, ...Object.fromEntries(consulted) };
+  }
+
+  async #finishProvider({ opened, job, pullRequest, result }) {
+    const { provider, token, url, checkRunId } = opened;
+    const target = { client: this.client, token, owner: job.owner, repo: job.repo, checkRunId, name: CHECK_NAMES[provider], detailsUrl: url };
+    const { consult: _consult, ...stored } = result;
+    this.queue.recordReview({
+      owner: job.owner,
+      repo: job.repo,
+      prNumber: job.prNumber,
+      headSha: pullRequest.head.sha,
+      provider,
+      ...(result.error ? { error: result.error } : { result: stored }),
+      checkRunId,
+    });
+    if (result.error) {
+      await completeFailedCheck({ ...target, summary: result.error }).catch((checkError) => this.logger.error('failed to publish provider failure check', {
         provider,
         error: errorSummary(checkError),
       }));
       this.metrics?.increment('ores_provider_errors_total', { provider });
-      return { error: summary, checkRunId: check.id };
+      return { error: result.error, checkRunId };
+    }
+    await completeReviewCheck({ ...target, review: stored });
+    this.metrics?.increment('ores_provider_reviews_total', { provider, verdict: result.verdict });
+    return { ...result, checkRunId };
+  }
+
+  // A provider whose check cannot be opened or completed fails closed without
+  // taking the other provider's result down with it.
+  async #settleProvider(provider, work) {
+    try {
+      return await work();
+    } catch (error) {
+      this.logger.error('provider review publication failed', { provider, error: errorSummary(error) });
+      this.metrics?.increment('ores_provider_errors_total', { provider });
+      return { error: errorSummary(error), checkRunId: null };
     }
   }
 
@@ -306,16 +302,24 @@ export class ReviewEngine {
 
     const files = await listPullRequestFiles(this.client, access.token, job.owner, job.repo, job.prNumber);
     const context = buildReviewContext({ pullRequest, files, reviewConfig: this.config.review });
-    const [independentOpenai, independentClaude] = await Promise.all([
-      this.#runProvider({ provider: 'openai', job, pullRequest, context }),
-      this.#runProvider({ provider: 'claude', job, pullRequest, context }),
-    ]);
-    const { openai, claude } = await this.#consultPeers({
-      job,
-      pullRequest,
+    const providers = ['openai', 'claude'];
+    const opened = await Promise.all(providers.map((provider) => this.#settleProvider(
+      provider,
+      () => this.#openProviderCheck({ provider, job, pullRequest }),
+    )));
+    const independent = await Promise.all(opened.map((check) => (
+      check.error ? check : this.#callProvider({ provider: check.provider, context })
+    )));
+    const final = await this.#consultPeers({
       context,
-      reviews: { openai: independentOpenai, claude: independentClaude },
+      reviews: { openai: independent[0], claude: independent[1] },
     });
+    const [openai, claude] = await Promise.all(opened.map((check, index) => (
+      check.error ? check : this.#settleProvider(
+        providers[index],
+        () => this.#finishProvider({ opened: check, job, pullRequest, result: final[providers[index]] }),
+      )
+    )));
 
     const latest = await getPullRequest(this.client, access.token, job.owner, job.repo, job.prNumber);
     if (latest.head.sha !== pullRequest.head.sha) {
@@ -456,6 +460,21 @@ export class ReviewEngine {
     }
 
     const gate = { ...evaluated, headSha: pullRequest.head.sha };
+    const attest = this.config.review.agentAttestations;
+    const publishSummary = async () => {
+      if (gate.status !== 'completed' || !this.config.review.postPullRequestReview) return;
+      await createPullRequestReview(this.client, orchestratorToken, job.owner, job.repo, job.prNumber, {
+        body: summaryBody(reviews, gate, { attest }),
+        event: 'COMMENT',
+        commitId: pullRequest.head.sha,
+      }).catch((error) => {
+        // Enabled attestations are part of the gate's contract: the gate check
+        // stays in progress and the durable queue retries the job.
+        if (attest) throw new Error(`attestation review publication failed: ${errorSummary(error)}`);
+        this.logger.warn('failed to post PR review summary', { error: errorSummary(error) });
+      });
+    };
+    if (attest) await publishSummary();
     await completeGateCheck({
       client: this.client,
       token: gateAccess.token,
@@ -482,13 +501,7 @@ export class ReviewEngine {
       });
     }
 
-    if (gate.status === 'completed' && this.config.review.postPullRequestReview) {
-      await createPullRequestReview(this.client, orchestratorToken, job.owner, job.repo, job.prNumber, {
-        body: summaryBody(reviews, gate, { attest: this.config.review.agentAttestations }),
-        event: 'COMMENT',
-        commitId: pullRequest.head.sha,
-      }).catch((error) => this.logger.warn('failed to post PR review summary', { error: errorSummary(error) }));
-    }
+    if (!attest) await publishSummary();
     return gate;
   }
 
