@@ -43,7 +43,7 @@ jobs:
 
       # Dart/Gleam SDKs are optional. When absent, dart.sh / gleam.sh skip
       # with an actionable message; require-send.mjs still runs via Node.
-      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
+      - uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
         if: steps.detect.outputs.dart == 'true'
         continue-on-error: true
 
