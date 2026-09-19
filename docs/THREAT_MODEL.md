@@ -17,4 +17,6 @@
 - **Webhook loss:** periodic reconciliation.
 - **Replay or duplicate delivery:** delivery table plus idempotent SHA jobs.
 - **Fork compromise:** central service reads GitHub-provided diffs only and never runs fork code.
+- **Agent tag abuse:** `ores-agent-tag` markers and `agent-tag:*` labels only request a review; the sender needs write access like `/ores-review`, the marker's head SHA is ignored in favour of the live head, and marker parsing is closed and bounded. Attestations are published only by the orchestrator App in a review anchored to the reviewed commit.
+- **Cross-model persuasion:** a peer consult shows one provider the other's review as untrusted data. Only a provider that approved is consulted, so a consult can withdraw an approval and can never grant one; a failed consult fails that provider's check.
 - **Provider outage or malformed output:** fail closed, retry transient faults, and publish a failed check with a redacted reason.

@@ -1,8 +1,12 @@
 import {
   CHECK_NAMES,
+  applyConsultResult,
+  buildReviewAttestations,
   createLogger,
   evaluateGate,
   parsePullRequestDependencies,
+  peerConsultPlan,
+  peerReviewForPrompt,
   pullRequestDependencyKey,
   redactText,
 } from '../../core/src/index.mjs';
@@ -37,8 +41,11 @@ function detailsUrl(config, owner, repo, prNumber, headSha) {
   return `${base}/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${prNumber}/${headSha}`;
 }
 
-function summaryBody(reviews, gate) {
-  const lines = ['ORES dual-AI review result:'];
+function summaryBody(reviews, gate, { attest = false } = {}) {
+  // Attestations lead the body so the my-ai agent-review-gate can read them
+  // from a review anchored to the exact head commit.
+  const attestations = attest ? buildReviewAttestations({ headSha: gate.headSha, reviews }) : [];
+  const lines = [...attestations, 'ORES dual-AI review result:'];
   for (const provider of ['openai', 'claude']) {
     const review = reviews[provider];
     if (!review) lines.push(`- ${provider}: pending`);
@@ -115,6 +122,23 @@ export class ReviewEngine {
       });
       return false;
     }
+  }
+
+  // Each provider that approved is invoked again with its peer's review. A
+  // failed consult keeps a failed check: #runProvider has already recorded it.
+  async #consultPeers({ job, pullRequest, context, reviews }) {
+    const plan = peerConsultPlan({ mode: this.config.review.peerConsult, reviews });
+    const consulted = await Promise.all(plan.map(async ({ provider, peer }) => {
+      this.metrics?.increment('ores_peer_consults_total', { provider, peer });
+      const result = await this.#runProvider({
+        provider,
+        job,
+        pullRequest,
+        context: { ...context, peerReview: peerReviewForPrompt(peer, reviews[peer]) },
+      });
+      return [provider, result.error ? result : applyConsultResult({ consulted: result })];
+    }));
+    return { ...reviews, ...Object.fromEntries(consulted) };
   }
 
   async #dispatchOffload(job, pullRequest) {
@@ -282,10 +306,16 @@ export class ReviewEngine {
 
     const files = await listPullRequestFiles(this.client, access.token, job.owner, job.repo, job.prNumber);
     const context = buildReviewContext({ pullRequest, files, reviewConfig: this.config.review });
-    const [openai, claude] = await Promise.all([
+    const [independentOpenai, independentClaude] = await Promise.all([
       this.#runProvider({ provider: 'openai', job, pullRequest, context }),
       this.#runProvider({ provider: 'claude', job, pullRequest, context }),
     ]);
+    const { openai, claude } = await this.#consultPeers({
+      job,
+      pullRequest,
+      context,
+      reviews: { openai: independentOpenai, claude: independentClaude },
+    });
 
     const latest = await getPullRequest(this.client, access.token, job.owner, job.repo, job.prNumber);
     if (latest.head.sha !== pullRequest.head.sha) {
@@ -454,7 +484,7 @@ export class ReviewEngine {
 
     if (gate.status === 'completed' && this.config.review.postPullRequestReview) {
       await createPullRequestReview(this.client, orchestratorToken, job.owner, job.repo, job.prNumber, {
-        body: summaryBody(reviews, gate),
+        body: summaryBody(reviews, gate, { attest: this.config.review.agentAttestations }),
         event: 'COMMENT',
         commitId: pullRequest.head.sha,
       }).catch((error) => this.logger.warn('failed to post PR review summary', { error: errorSummary(error) }));
