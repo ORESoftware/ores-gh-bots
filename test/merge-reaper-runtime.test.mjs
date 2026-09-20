@@ -12,17 +12,21 @@ function actionReferences(workflow) {
 }
 
 test('merge reaper has one canonical CLI and dedicated App boundary', async () => {
-  const [cli, manifestText, policyText, inventoryText, secretsText, env] = await Promise.all([
+  const [cli, manifestText, policyText, inventoryText, schemaText, secretsText, env, bootstrap, cliSource] = await Promise.all([
     read('.cli-flags.toml'),
     read('github-apps/merge-reaper.manifest.json'),
     read('github-apps/policy.json'),
     read('config/installations.example.json'),
+    read('config/installations.schema.json'),
     read('config/secrets.example.json'),
     read('.env.example'),
+    read('scripts/app-manifest.mjs'),
+    read('apps/cli/src/main.mjs'),
   ]);
   const manifest = JSON.parse(manifestText);
   const policy = JSON.parse(policyText);
   const inventory = JSON.parse(inventoryText);
+  const schema = JSON.parse(schemaText);
   const secrets = JSON.parse(secretsText);
 
   assert.match(cli, /^\[commands\.reaper\]$/mu);
@@ -50,10 +54,14 @@ test('merge reaper has one canonical CLI and dedicated App boundary', async () =
   ]);
   assert.ok(inventory.apps.reaper);
   assert.equal(inventory.apps.reaper.visibility, 'public-unlisted');
+  assert.ok(schema.properties.apps.required.includes('reaper'));
+  assert.ok(schema.properties.apps.properties.reaper);
   assert.ok(secrets.requiredKeys.includes('MERGE_REAPER_APP_ID'));
   assert.ok(secrets.requiredKeys.includes('MERGE_REAPER_APP_PRIVATE_KEY'));
   assert.match(env, /^MERGE_REAPER_APP_ID=/mu);
   assert.match(env, /^MERGE_REAPER_APP_PRIVATE_KEY=/mu);
+  assert.match(bootstrap, /reaper:\s*\{\s*id:\s*'MERGE_REAPER_APP_ID',\s*pem:\s*'MERGE_REAPER_APP_PRIVATE_KEY'/su);
+  assert.match(cliSource, /'merge-reaper'/u);
 });
 
 test('merge reaper workflow preserves supply-chain and report boundaries', async () => {
@@ -79,6 +87,7 @@ test('merge reaper workflow preserves supply-chain and report boundaries', async
   assert.match(workflow, /merge-reaper-public-report\.json/u);
   assert.doesNotMatch(workflow, /path:\s*merge-reaper-report\.json/u);
   assert.match(workflow, /rmSync\('merge-reaper-report\.json'\)/u);
+  assert.match(workflow, /currentHour === 1 && previousHour !== 1/u);
 });
 
 test('runtime keeps exact-head merge and bounded-effect invariants visible at the executable boundary', async () => {
@@ -104,4 +113,7 @@ test('runtime keeps exact-head merge and bounded-effect invariants visible at th
   assert.match(source, /privateMetadataRedacted:\s*true/u);
   assert.match(source, /Merge reaper and gate GitHub App identities must be distinct/u);
   assert.match(source, /\^MERGE-/u);
+  assert.match(source, /policy\.requireHumanApproval/u);
+  assert.match(source, /auth\.installationToken\('reaper', repository\.installationId\)/u);
+  assert.doesNotMatch(source, /repository\.token/u);
 });
