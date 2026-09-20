@@ -10,8 +10,12 @@ fail() {
   exit 1
 }
 
-# The tracked hook remains the authority when .githooks is active.
-grep -Fq 'zed validate' "$ROOT/.githooks/pre-push" || fail "tracked hook lost zed validation"
+# The tracked hook remains the authority when .githooks is active. Accept the
+# direct `zed validate` form or the reviewed `$zed_bin validate` wrapper, but
+# comments alone do not count as evidence.
+if ! grep -Ev '^[[:space:]]*#' "$ROOT/.githooks/pre-push" | grep -Eq '(^|[[:space:]"'"'])(zed|\$\{?zed_bin\}?|\$\{?ZED_BIN\}?)(["'"']?)[[:space:]]+validate([[:space:]]|$)'; then
+  fail "tracked hook lost executable zed validation"
+fi
 grep -Fq 'conformance/check.sh --full' "$ROOT/.githooks/pre-push" || fail "tracked hook lost full conformance"
 grep -Fq '.ores-lint/lint.sh' "$ROOT/.githooks/pre-push" || fail "tracked hook does not invoke ores-lint"
 
