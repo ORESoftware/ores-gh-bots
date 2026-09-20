@@ -4,6 +4,7 @@ import { readdir, readFile } from 'node:fs/promises';
 
 const WORKFLOW_DIRECTORY = new URL('../.github/workflows/', import.meta.url);
 const IMMUTABLE_ACTION_REVISION = /^[0-9a-f]{40}$/iu;
+const IMMUTABLE_CONTAINER_IMAGE = /^[^@\s]+@sha256:[0-9a-f]{64}$/iu;
 const PROHIBITED_FLEET_TOKEN_NAMES = /\b(?:FLEET_PR_TOKEN|GITHUB_PAT|GH_PAT|PERSONAL_ACCESS_TOKEN)\b/u;
 const UNTRUSTED_EXPRESSION_IN_SHELL = /\$\{\{\s*(?:inputs\.|github\.event\.(?:inputs\.|pull_request\.(?:title|body|head\.ref)|issue\.(?:title|body)|comment\.body))/u;
 
@@ -48,6 +49,23 @@ function shellBodies(source) {
   return bodies;
 }
 
+function immutableContainerImage(reference) {
+  return IMMUTABLE_CONTAINER_IMAGE.test(String(reference ?? ''));
+}
+
+function workflowContainerImages(source) {
+  return source.split(/\r?\n/u).flatMap((line, lineNumber) => {
+    const uses = /^\s*(?:-\s*)?uses:\s*docker:\/\/([^\s#]+)/u.exec(line);
+    if (uses) return [{ lineNumber: lineNumber + 1, reference: uses[1], source: 'docker uses' }];
+
+    // Covers YAML image: fields (job/service/action inputs) and driver-opts
+    // lines such as image=moby/buildkit@sha256:... . Uppercase IMAGE env vars
+    // are intentionally not configuration references and therefore do not match.
+    const image = /^\s*image\s*[:=]\s*["']?([^\s#"']+)/u.exec(line);
+    return image ? [{ lineNumber: lineNumber + 1, reference: image[1], source: 'image field' }] : [];
+  });
+}
+
 test('third-party workflow actions are pinned to immutable commit SHAs', async () => {
   for (const workflow of await loadWorkflows()) {
     for (const [lineNumber, line] of workflow.source.split('\n').entries()) {
@@ -55,7 +73,14 @@ test('third-party workflow actions are pinned to immutable commit SHAs', async (
       if (!match) continue;
 
       const reference = match[1];
-      if (reference.startsWith('./') || reference.startsWith('docker://')) continue;
+      if (reference.startsWith('./')) continue;
+      if (reference.startsWith('docker://')) {
+        assert.ok(
+          immutableContainerImage(reference.slice('docker://'.length)),
+          `${workflow.name}:${lineNumber + 1} docker action must pin an immutable sha256 image digest`,
+        );
+        continue;
+      }
 
       const separator = reference.lastIndexOf('@');
       assert.notEqual(separator, -1, `${workflow.name}:${lineNumber + 1} action is missing a revision`);
@@ -67,6 +92,50 @@ test('third-party workflow actions are pinned to immutable commit SHAs', async (
       );
     }
   }
+});
+
+test('workflow container and helper images are pinned to immutable sha256 digests', async () => {
+  for (const workflow of await loadWorkflows()) {
+    for (const image of workflowContainerImages(workflow.source)) {
+      assert.ok(
+        immutableContainerImage(image.reference),
+        `${workflow.name}:${image.lineNumber} ${image.source} must pin ${image.reference} to an immutable sha256 digest`,
+      );
+    }
+  }
+});
+
+test('container-image guard rejects mutable tags and accepts only full sha256 digests', () => {
+  for (const mutable of [
+    'docker.io/tonistiigi/binfmt:latest',
+    'moby/buildkit:v0.24.0',
+    'ghcr.io/example/tool@main',
+    'alpine',
+    'alpine@sha256:deadbeef',
+  ]) {
+    assert.equal(immutableContainerImage(mutable), false, mutable);
+  }
+  assert.equal(
+    immutableContainerImage(`moby/buildkit@sha256:${'a'.repeat(64)}`),
+    true,
+  );
+
+  const fixtures = workflowContainerImages([
+    'steps:',
+    '  - uses: docker://alpine:3.20',
+    '    with:',
+    '      image: docker.io/tonistiigi/binfmt:latest',
+    '      driver-opts: |',
+    '        image=moby/buildkit:v0.24.0',
+    '    env:',
+    '      IMAGE: local:test',
+  ].join('\n'));
+  assert.deepEqual(fixtures.map((item) => item.reference), [
+    'alpine:3.20',
+    'docker.io/tonistiigi/binfmt:latest',
+    'moby/buildkit:v0.24.0',
+  ]);
+  assert.ok(fixtures.every((item) => !immutableContainerImage(item.reference)));
 });
 
 test('workflow shell bodies never interpolate attacker-controlled event text directly', async () => {
