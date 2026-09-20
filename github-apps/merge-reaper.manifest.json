@@ -1,7 +1,6 @@
 {
   "name": "ORES Nightly Merge Reaper",
   "url": "https://github.com/ORESoftware/ores-gh-bots",
-  "redirect_url": "https://replace.example/github/app-manifest/callback",
   "public": true,
   "default_permissions": {
     "checks": "read",
