@@ -14,7 +14,7 @@ function firstMatch(source, pattern) {
 export function inspectKubernetesImagePins({ base, canary, production }) {
   const baseImage = firstMatch(
     base,
-    /^\s*image:\s*(ghcr\.io\/oresoftware\/ores-gh-bots(?:@sha256:[0-9a-f]{64}|:[^\s#]+))\s*$/mu,
+    /^\s*(?:-\s*)?image:\s*(ghcr\.io\/oresoftware\/ores-gh-bots(?:@sha256:[0-9a-f]{64}|:[^\s#]+))\s*$/mu,
   );
   const overlayDigest = (source) => firstMatch(source, /^\s*digest:\s*(sha256:[0-9a-f]{64})\s*$/mu);
   const overlayName = (source) => firstMatch(source, /^\s*-\s+name:\s*(ghcr\.io\/oresoftware\/ores-gh-bots)\s*$/mu);
