@@ -1,5 +1,25 @@
 # syntax=docker/dockerfile:1.7
 # ores-expected-target: linux/amd64
+FROM --platform=$TARGETPLATFORM node:22.16.0-bookworm-slim AS dependencies
+
+ARG TARGETPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
+RUN test "${TARGETOS:?TARGETOS is required}" = "linux" \
+    && test "${TARGETARCH:?TARGETARCH is required}" = "amd64"
+
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+COPY package.json package-lock.json ./
+COPY apps ./apps
+COPY packages ./packages
+RUN npm ci --omit=dev --ignore-scripts \
+    && npm run build:flags2env \
+    && npm cache clean --force \
+    && rm -rf /root/.cache/node-gyp
+
 FROM --platform=$TARGETPLATFORM node:22.16.0-bookworm-slim AS runtime
 
 ARG TARGETPLATFORM
@@ -10,11 +30,13 @@ RUN test "${TARGETOS:?TARGETOS is required}" = "linux" \
 
 WORKDIR /app
 ENV NODE_ENV=production
-COPY package.json ./
+COPY package.json package-lock.json ./
+COPY .cli-flags.toml ./
 COPY apps ./apps
 COPY packages ./packages
 COPY scripts ./scripts
 COPY config ./config
+COPY --from=dependencies --chown=node:node /app/node_modules ./node_modules
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN mkdir -p /data \
     && chown -R node:node /app /data
