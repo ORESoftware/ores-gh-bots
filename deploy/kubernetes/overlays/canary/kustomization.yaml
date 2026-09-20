@@ -3,6 +3,10 @@ kind: Kustomization
 resources:
   - ../../base
 nameSuffix: -canary
+images:
+  - name: ghcr.io/oresoftware/ores-gh-bots
+    # Inactive fail-closed sentinel. Replace with the verified published digest.
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 patches:
   - target:
       kind: ConfigMap
