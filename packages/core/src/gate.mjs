@@ -74,25 +74,39 @@ function evaluateNormalizedCiContext(context, item) {
   return { context, state: 'failure', reason: item.state };
 }
 
-function evaluateRequiredCiContext(context, item, expectedAppId) {
-  if (!item) return { context, state: 'pending', reason: 'missing' };
+function hasTransportProvenance(item) {
+  return item.source !== undefined || item.rawStatus !== undefined || item.rawConclusion !== undefined;
+}
+
+function numericCiId(item) {
+  const text = String(item?.id ?? '');
+  return /^\d+$/.test(text) ? BigInt(text) : null;
+}
+
+function newestCiItem(items) {
+  return items.reduce((latest, item) => {
+    if (!latest) return item;
+    const latestId = numericCiId(latest);
+    const itemId = numericCiId(item);
+    if (latestId !== null && itemId !== null) return itemId > latestId ? item : latest;
+    // Synthetic/unit-test evidence may not carry an id. Preserve the historical
+    // "last value wins" behavior for that compatibility-only path.
+    return item;
+  }, null);
+}
+
+function evaluateRequiredCiContext(context, candidates, expectedAppId) {
+  if (candidates.length === 0) return { context, state: 'pending', reason: 'missing' };
 
   if (expectedAppId !== null) {
-    const hasTransportProvenance = (
-      item.source !== undefined || item.rawStatus !== undefined || item.rawConclusion !== undefined
-    );
+    const runtimeCandidates = candidates.filter(hasTransportProvenance);
 
-    // Runtime GitHub snapshots are authenticated evidence families, not generic
-    // branch-protection contexts. Once transport provenance is present, require
-    // a real Check Run before evaluating App identity or terminal state. This
-    // ensures a same-name PAT status is rejected as the wrong evidence family
-    // rather than merely as an App-id mismatch.
-    //
     // `evaluateGate` is also a pure function used by older unit fixtures that
-    // inject already-normalized CI objects directly. Those provenance-less
-    // synthetic objects retain normalized semantics; the production path always
-    // enters here through getCiSnapshot(), which supplies source/raw fields.
-    if (!hasTransportProvenance) {
+    // inject already-normalized CI objects directly. Provenance-less synthetic
+    // objects retain normalized semantics; production snapshots always include
+    // source/raw fields and take the authenticated path below.
+    if (runtimeCandidates.length === 0) {
+      const item = newestCiItem(candidates);
       if (Number(item.appId) !== Number(expectedAppId)) {
         return {
           context,
@@ -102,16 +116,21 @@ function evaluateRequiredCiContext(context, item, expectedAppId) {
       }
       return evaluateNormalizedCiContext(context, item);
     }
-    if (item.source !== 'check_run') {
-      return { context, state: 'failure', reason: 'App-bound CI requires a GitHub Check Run' };
-    }
-    if (Number(item.appId) !== Number(expectedAppId)) {
+
+    // Ignore foreign same-name checks/statuses rather than letting them shadow
+    // the trusted App. Absence of the expected App is pending, never success.
+    const trustedChecks = runtimeCandidates.filter((item) => (
+      item.source === 'check_run' && Number(item.appId) === Number(expectedAppId)
+    ));
+    if (trustedChecks.length === 0) {
       return {
         context,
-        state: 'failure',
-        reason: `app identity mismatch: expected ${expectedAppId}, received ${item.appId ?? 'none'}`,
+        state: 'pending',
+        reason: `expected App-owned Check Run missing (App ${expectedAppId})`,
       };
     }
+
+    const item = newestCiItem(trustedChecks);
     if (item.rawStatus !== 'completed') {
       if (['queued', 'in_progress', 'pending', 'requested', 'waiting', 'expected'].includes(item.rawStatus)) {
         return { context, state: 'pending', reason: item.rawStatus };
@@ -132,7 +151,7 @@ function evaluateRequiredCiContext(context, item, expectedAppId) {
     return { context, state: 'success', reason: 'App-owned completed/success Check Run' };
   }
 
-  return evaluateNormalizedCiContext(context, item);
+  return evaluateNormalizedCiContext(context, newestCiItem(candidates));
 }
 
 export function evaluateGate({
@@ -153,11 +172,15 @@ export function evaluateGate({
     return { provider, state: 'success', reason: 'approved' };
   });
 
-  const latestByContext = new Map();
-  for (const item of ci) latestByContext.set(item.context, item);
+  const ciByContext = new Map();
+  for (const item of ci) {
+    const candidates = ciByContext.get(item.context) ?? [];
+    candidates.push(item);
+    ciByContext.set(item.context, candidates);
+  }
   const ciStates = requiredCiContexts.map((context) => evaluateRequiredCiContext(
     context,
-    latestByContext.get(context),
+    ciByContext.get(context) ?? [],
     requiredCiAppIds[context] ?? null,
   ));
 
