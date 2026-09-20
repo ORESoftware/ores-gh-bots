@@ -191,24 +191,39 @@ function normalizeCheckState(check) {
 export async function getCiSnapshot(client, token, owner, repo, headSha) {
   const checksResponse = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/check-runs?filter=latest&per_page=100`, { token });
   const statusesResponse = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/status`, { token });
-  const latest = new Map();
+
+  // Keep the newest run for each (context, App) pair. App-bound admission must
+  // be able to select the expected App even when another App publishes a newer
+  // same-name check. Collapsing by context alone turns a foreign check into a
+  // denial-of-service primitive and loses the authenticated evidence family.
+  const checks = new Map();
+  const checkContexts = new Set();
   for (const check of checksResponse.data.check_runs ?? []) {
     if (OWN_CHECK_NAMES.has(check.name)) continue;
-    const current = latest.get(check.name);
-    if (!current || check.id > current.id) latest.set(check.name, {
+    const appId = check.app?.id ?? null;
+    const key = `${check.name}\u0000${appId ?? 'none'}`;
+    const current = checks.get(key);
+    if (!current || check.id > current.id) checks.set(key, {
       id: check.id,
       context: check.name,
       state: normalizeCheckState(check),
       source: 'check_run',
       rawStatus: check.status ?? null,
       rawConclusion: check.conclusion ?? null,
-      appId: check.app?.id ?? null,
+      appId,
       url: check.html_url,
     });
+    checkContexts.add(check.name);
   }
+
+  // Preserve the existing evidence-family preference: a legacy commit status is
+  // considered only when no Check Run exists for that context at all. Multiple
+  // statuses for one context collapse to the newest status.
+  const statuses = new Map();
   for (const status of statusesResponse.data.statuses ?? []) {
-    if (OWN_CHECK_NAMES.has(status.context)) continue;
-    if (!latest.has(status.context)) latest.set(status.context, {
+    if (OWN_CHECK_NAMES.has(status.context) || checkContexts.has(status.context)) continue;
+    const current = statuses.get(status.context);
+    if (!current || status.id > current.id) statuses.set(status.context, {
       id: status.id,
       context: status.context,
       state: status.state,
@@ -219,5 +234,5 @@ export async function getCiSnapshot(client, token, owner, repo, headSha) {
       url: status.target_url,
     });
   }
-  return [...latest.values()];
+  return [...checks.values(), ...statuses.values()];
 }
