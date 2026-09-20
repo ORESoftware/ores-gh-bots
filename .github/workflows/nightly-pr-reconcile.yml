@@ -74,7 +74,9 @@ jobs:
   reconcile:
     needs: plan
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # create-github-app-token installation credentials expire after one hour.
+    # Fail the whole per-org effect window closed before that authority can age out.
+    timeout-minutes: 55
     strategy:
       fail-fast: false
       matrix:
