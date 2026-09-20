@@ -189,13 +189,12 @@ function normalizeCheckState(check) {
 }
 
 export async function getCiSnapshot(client, token, owner, repo, headSha) {
-  const checksResponse = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/check-runs?filter=latest&per_page=100`, { token });
+  // `filter=all` is intentional. App-bound admission selects the newest run from
+  // the expected App; asking GitHub for only a pre-collapsed "latest" view can
+  // hide that trusted run behind a same-name run from another check suite/App.
+  const checksResponse = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/check-runs?filter=all&per_page=100`, { token });
   const statusesResponse = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/status`, { token });
 
-  // Keep the newest run for each (context, App) pair. App-bound admission must
-  // be able to select the expected App even when another App publishes a newer
-  // same-name check. Collapsing by context alone turns a foreign check into a
-  // denial-of-service primitive and loses the authenticated evidence family.
   const checks = new Map();
   const checkContexts = new Set();
   for (const check of checksResponse.data.check_runs ?? []) {
@@ -216,9 +215,6 @@ export async function getCiSnapshot(client, token, owner, repo, headSha) {
     checkContexts.add(check.name);
   }
 
-  // Preserve the existing evidence-family preference: a legacy commit status is
-  // considered only when no Check Run exists for that context at all. Multiple
-  // statuses for one context collapse to the newest status.
   const statuses = new Map();
   for (const status of statusesResponse.data.statuses ?? []) {
     if (OWN_CHECK_NAMES.has(status.context) || checkContexts.has(status.context)) continue;
