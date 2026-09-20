@@ -1,3 +1,4 @@
+import { labelProvider, reviewTagProviders } from './agent-tags.mjs';
 import { CHECK_NAMES, OWN_CHECK_NAMES, SUPPORTED_PULL_REQUEST_ACTIONS } from './constants.mjs';
 
 function prJob(payload, type = 'review', reason = 'webhook') {
@@ -40,6 +41,13 @@ function pullRequestJobs(payload, action) {
     const job = prJob(payload, 'gate', 'pull_request.review_requested');
     return job ? [{ ...job, force: true }] : [];
   }
+  if (action === 'labeled') {
+    // agent-tag:<family> is another agent asking a family this service hosts
+    // for a review. The labeler is authorized like a manual command sender.
+    if (!labelProvider(payload.label?.name)) return [];
+    const job = prJob(payload, 'review', 'pull_request.labeled:agent-tag');
+    return job ? [{ ...job, force: true, needsAuthorization: true, sender: payload.sender?.login }] : [];
+  }
   if (!SUPPORTED_PULL_REQUEST_ACTIONS.has(action)) return [];
   const job = prJob(payload, 'review', `pull_request.${action}`);
   return job
@@ -74,16 +82,18 @@ function checkRunJobs(payload, action) {
 function issueCommentJobs(payload, action) {
   if (action !== 'created' || !payload.issue?.pull_request) return [];
   const body = String(payload.comment?.body ?? '').trim();
-  if (!/^\/ores-review(?:\s|$)/i.test(body)) return [];
+  const command = /^\/ores-review(?:\s|$)/i.test(body);
+  const tagged = !command && reviewTagProviders(body).length > 0;
+  if (!command && !tagged) return [];
 
   return [{
-    type: /\bgate\b/i.test(body) ? 'gate' : 'review',
+    type: command && /\bgate\b/i.test(body) ? 'gate' : 'review',
     installationId: payload.installation?.id,
     owner: payload.repository?.owner?.login,
     repo: payload.repository?.name,
     prNumber: payload.issue.number,
     headSha: null,
-    reason: 'issue_comment.command',
+    reason: tagged ? 'issue_comment.agent-tag' : 'issue_comment.command',
     force: true,
     needsAuthorization: true,
     sender: payload.sender?.login,

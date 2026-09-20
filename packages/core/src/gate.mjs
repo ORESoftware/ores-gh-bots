@@ -66,6 +66,98 @@ function evaluateProjectionAdmission(kind, candidates, projectionContext) {
   return { projectionKind: kind, state: 'success', reason: 'exact Contract IR evidence admitted' };
 }
 
+function evaluateNormalizedCiContext(context, item) {
+  if (['queued', 'in_progress', 'pending', 'requested', 'waiting', 'expected'].includes(item.state)) {
+    return { context, state: 'pending', reason: item.state };
+  }
+  if (item.state === 'success') return { context, state: 'success', reason: 'success' };
+  return { context, state: 'failure', reason: item.state };
+}
+
+function hasTransportProvenance(item) {
+  return item.source !== undefined || item.rawStatus !== undefined || item.rawConclusion !== undefined;
+}
+
+function numericCiId(item) {
+  const text = String(item?.id ?? '');
+  return /^\d+$/.test(text) ? BigInt(text) : null;
+}
+
+function newestCiItem(items) {
+  return items.reduce((latest, item) => {
+    if (!latest) return item;
+    const latestId = numericCiId(latest);
+    const itemId = numericCiId(item);
+    if (latestId !== null && itemId !== null) return itemId > latestId ? item : latest;
+    // Synthetic/unit-test evidence may not carry an id. Preserve the historical
+    // "last value wins" behavior for that compatibility-only path.
+    return item;
+  }, null);
+}
+
+function evaluateRequiredCiContext(context, candidates, expectedAppId) {
+  if (candidates.length === 0) return { context, state: 'pending', reason: 'missing' };
+
+  if (expectedAppId !== null) {
+    const runtimeCandidates = candidates.filter(hasTransportProvenance);
+
+    // `evaluateGate` is also a pure function used by older unit fixtures that
+    // inject already-normalized CI objects directly. Provenance-less synthetic
+    // objects retain normalized semantics; production snapshots always include
+    // source/raw fields and take the authenticated path below.
+    if (runtimeCandidates.length === 0) {
+      const item = newestCiItem(candidates);
+      if (Number(item.appId) !== Number(expectedAppId)) {
+        return {
+          context,
+          state: 'failure',
+          reason: `app identity mismatch: expected ${expectedAppId}, received ${item.appId ?? 'none'}`,
+        };
+      }
+      return evaluateNormalizedCiContext(context, item);
+    }
+
+    // Select the newest run from the expected App. A foreign newer same-name
+    // check must not shadow authenticated evidence from the trusted App.
+    const trustedChecks = runtimeCandidates.filter((item) => (
+      item.source === 'check_run' && Number(item.appId) === Number(expectedAppId)
+    ));
+    if (trustedChecks.length === 0) {
+      const anyCheck = newestCiItem(runtimeCandidates.filter((item) => item.source === 'check_run'));
+      if (anyCheck) {
+        return {
+          context,
+          state: 'failure',
+          reason: `app identity mismatch: expected ${expectedAppId}, received ${anyCheck.appId ?? 'none'}`,
+        };
+      }
+      return { context, state: 'failure', reason: 'App-bound CI requires a GitHub Check Run' };
+    }
+
+    const item = newestCiItem(trustedChecks);
+    if (item.rawStatus !== 'completed') {
+      if (['queued', 'in_progress', 'pending', 'requested', 'waiting', 'expected'].includes(item.rawStatus)) {
+        return { context, state: 'pending', reason: item.rawStatus };
+      }
+      return {
+        context,
+        state: 'failure',
+        reason: `invalid raw check status: ${item.rawStatus ?? 'missing'}`,
+      };
+    }
+    if (item.rawConclusion !== 'success') {
+      return {
+        context,
+        state: 'failure',
+        reason: `raw check conclusion is ${item.rawConclusion ?? 'missing'}, not success`,
+      };
+    }
+    return { context, state: 'success', reason: 'App-owned completed/success Check Run' };
+  }
+
+  return evaluateNormalizedCiContext(context, newestCiItem(candidates));
+}
+
 export function evaluateGate({
   reviews,
   ci = [],
@@ -84,25 +176,17 @@ export function evaluateGate({
     return { provider, state: 'success', reason: 'approved' };
   });
 
-  const latestByContext = new Map();
-  for (const item of ci) latestByContext.set(item.context, item);
-  const ciStates = requiredCiContexts.map((context) => {
-    const item = latestByContext.get(context);
-    if (!item) return { context, state: 'pending', reason: 'missing' };
-    const expectedAppId = requiredCiAppIds[context] ?? null;
-    if (expectedAppId !== null && Number(item.appId) !== Number(expectedAppId)) {
-      return {
-        context,
-        state: 'failure',
-        reason: `app identity mismatch: expected ${expectedAppId}, received ${item.appId ?? 'none'}`,
-      };
-    }
-    if (['queued', 'in_progress', 'pending', 'requested', 'waiting', 'expected'].includes(item.state)) {
-      return { context, state: 'pending', reason: item.state };
-    }
-    if (item.state === 'success') return { context, state: 'success', reason: 'success' };
-    return { context, state: 'failure', reason: item.state };
-  });
+  const ciByContext = new Map();
+  for (const item of ci) {
+    const candidates = ciByContext.get(item.context) ?? [];
+    candidates.push(item);
+    ciByContext.set(item.context, candidates);
+  }
+  const ciStates = requiredCiContexts.map((context) => evaluateRequiredCiContext(
+    context,
+    ciByContext.get(context) ?? [],
+    requiredCiAppIds[context] ?? null,
+  ));
 
   const requiredKinds = Array.isArray(requiredProjectionKinds) ? requiredProjectionKinds : [null];
   const duplicateRequiredKinds = new Set();

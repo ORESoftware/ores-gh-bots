@@ -189,29 +189,46 @@ function normalizeCheckState(check) {
 }
 
 export async function getCiSnapshot(client, token, owner, repo, headSha) {
+  // Check suites are App-scoped. Keep GitHub's latest check-suite view, then
+  // preserve one newest run per (context, App) locally so a foreign same-name
+  // App cannot shadow the expected App's evidence during admission.
   const checksResponse = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/check-runs?filter=latest&per_page=100`, { token });
   const statusesResponse = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/status`, { token });
-  const latest = new Map();
+
+  const checks = new Map();
+  const checkContexts = new Set();
   for (const check of checksResponse.data.check_runs ?? []) {
     if (OWN_CHECK_NAMES.has(check.name)) continue;
-    const current = latest.get(check.name);
-    if (!current || check.id > current.id) latest.set(check.name, {
+    const appId = check.app?.id ?? null;
+    const key = `${check.name}\u0000${appId ?? 'none'}`;
+    const current = checks.get(key);
+    if (!current || check.id > current.id) checks.set(key, {
       id: check.id,
       context: check.name,
       state: normalizeCheckState(check),
-      appId: check.app?.id ?? null,
+      source: 'check_run',
+      rawStatus: check.status ?? null,
+      rawConclusion: check.conclusion ?? null,
+      appId,
       url: check.html_url,
     });
+    checkContexts.add(check.name);
   }
+
+  const statuses = new Map();
   for (const status of statusesResponse.data.statuses ?? []) {
-    if (OWN_CHECK_NAMES.has(status.context)) continue;
-    if (!latest.has(status.context)) latest.set(status.context, {
+    if (OWN_CHECK_NAMES.has(status.context) || checkContexts.has(status.context)) continue;
+    const current = statuses.get(status.context);
+    if (!current || status.id > current.id) statuses.set(status.context, {
       id: status.id,
       context: status.context,
       state: status.state,
+      source: 'commit_status',
+      rawStatus: null,
+      rawConclusion: null,
       appId: null,
       url: status.target_url,
     });
   }
-  return [...latest.values()];
+  return [...checks.values(), ...statuses.values()];
 }

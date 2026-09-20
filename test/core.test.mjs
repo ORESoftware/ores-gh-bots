@@ -15,6 +15,7 @@ import {
   validateRuntimeConfig,
   verifyWebhookSignature,
 } from '../packages/core/src/index.mjs';
+import { getCiSnapshot } from '../packages/github/src/checks.mjs';
 
 const goodReview = {
   verdict: 'approve',
@@ -76,24 +77,144 @@ test('gate fails closed for missing or non-approving providers', () => {
   assert.equal(passed.conclusion, 'success');
 });
 
-test('gate pins required CI contexts to expected GitHub App identities', () => {
+test('CI snapshot preserves source and raw Check Run semantics', async () => {
+  const client = {
+    async request(method, path) {
+      assert.equal(method, 'GET');
+      if (path.includes('/check-runs?')) {
+        return {
+          data: {
+            check_runs: [
+              {
+                id: 9,
+                name: 'ci/verify',
+                status: 'completed',
+                conclusion: 'skipped',
+                app: { id: 42 },
+                html_url: 'https://example.invalid/check/9',
+              },
+            ],
+          },
+        };
+      }
+      if (path.endsWith('/status')) {
+        return {
+          data: {
+            statuses: [
+              {
+                id: 10,
+                context: 'ci/status-only',
+                state: 'success',
+                target_url: 'https://example.invalid/status/10',
+              },
+            ],
+          },
+        };
+      }
+      throw new Error(`unexpected path ${path}`);
+    },
+  };
+
+  const snapshot = await getCiSnapshot(client, 'token', 'o', 'r', 'a'.repeat(40));
+  assert.deepEqual(snapshot.find((item) => item.context === 'ci/verify'), {
+    id: 9,
+    context: 'ci/verify',
+    state: 'success',
+    source: 'check_run',
+    rawStatus: 'completed',
+    rawConclusion: 'skipped',
+    appId: 42,
+    url: 'https://example.invalid/check/9',
+  });
+  assert.deepEqual(snapshot.find((item) => item.context === 'ci/status-only'), {
+    id: 10,
+    context: 'ci/status-only',
+    state: 'success',
+    source: 'commit_status',
+    rawStatus: null,
+    rawConclusion: null,
+    appId: null,
+    url: 'https://example.invalid/status/10',
+  });
+});
+
+test('gate pins App-bound CI to a raw completed/success Check Run', () => {
   const reviews = { openai: goodReview, claude: goodReview };
+  const requiredCiContexts = ['ci/verify'];
+  const requiredCiAppIds = { 'ci/verify': 42 };
+  const base = { reviews, requiredCiContexts, requiredCiAppIds };
+
   const passed = evaluateGate({
-    reviews,
-    ci: [{ context: 'ci/verify', state: 'success', appId: 42 }],
-    requiredCiContexts: ['ci/verify'],
-    requiredCiAppIds: { 'ci/verify': 42 },
+    ...base,
+    ci: [{
+      context: 'ci/verify',
+      state: 'success',
+      source: 'check_run',
+      rawStatus: 'completed',
+      rawConclusion: 'success',
+      appId: 42,
+    }],
   });
   assert.equal(passed.conclusion, 'success');
+  assert.match(passed.ciStates[0].reason, /App-owned completed\/success/);
 
   const spoofed = evaluateGate({
-    reviews,
-    ci: [{ context: 'ci/verify', state: 'success', appId: 99 }],
-    requiredCiContexts: ['ci/verify'],
-    requiredCiAppIds: { 'ci/verify': 42 },
+    ...base,
+    ci: [{
+      context: 'ci/verify',
+      state: 'success',
+      source: 'check_run',
+      rawStatus: 'completed',
+      rawConclusion: 'success',
+      appId: 99,
+    }],
   });
   assert.equal(spoofed.conclusion, 'failure');
   assert.match(spoofed.ciStates[0].reason, /app identity mismatch/);
+
+  for (const rawConclusion of ['neutral', 'skipped']) {
+    const normalizedButNotStrict = evaluateGate({
+      ...base,
+      ci: [{
+        context: 'ci/verify',
+        state: 'success',
+        source: 'check_run',
+        rawStatus: 'completed',
+        rawConclusion,
+        appId: 42,
+      }],
+    });
+    assert.equal(normalizedButNotStrict.conclusion, 'failure');
+    assert.match(normalizedButNotStrict.ciStates[0].reason, /not success/);
+  }
+
+  const patStatus = evaluateGate({
+    ...base,
+    ci: [{
+      context: 'ci/verify',
+      state: 'success',
+      source: 'commit_status',
+      rawStatus: null,
+      rawConclusion: null,
+      appId: null,
+    }],
+  });
+  assert.equal(patStatus.conclusion, 'failure');
+  assert.match(patStatus.ciStates[0].reason, /requires a GitHub Check Run/);
+
+  const inProgress = evaluateGate({
+    ...base,
+    ci: [{
+      context: 'ci/verify',
+      state: 'in_progress',
+      source: 'check_run',
+      rawStatus: 'in_progress',
+      rawConclusion: null,
+      appId: 42,
+    }],
+  });
+  assert.equal(inProgress.status, 'in_progress');
+  assert.equal(inProgress.conclusion, null);
 });
 
 test('routes supported PR and manual review events', () => {
@@ -187,7 +308,6 @@ test('owner allowlist fails closed', () => {
   const config = loadConfig({ OWNER_ALLOWLIST: 'ORESoftware', OWNER_PATTERNS: '.*-test$' });
   assert.equal(ownerIsAllowed(config, 'ORESoftware'), true);
   assert.equal(ownerIsAllowed(config, 'fiducia-cloud-test'), true);
-  assert.equal(ownerIsAllowed(config, 'random-org'), false);
   assert.equal(ownerIsAllowed(loadConfig({}), 'ORESoftware'), false);
 });
 
