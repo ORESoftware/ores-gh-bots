@@ -3,17 +3,35 @@ name: OCI multi-architecture
 on:
   pull_request:
     paths:
+      - Dockerfile
       - Dockerfile.arm64.dkf
       - Dockerfile.x86_64.dkf
       - entrypoint.sh
+      - package.json
+      - package-lock.json
+      - .cli-flags.toml
+      - .dockerignore
+      - 'apps/**'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'config/**'
       - .github/workflows/oci-multiarch.yml
   push:
     branches:
       - main
     paths:
+      - Dockerfile
       - Dockerfile.arm64.dkf
       - Dockerfile.x86_64.dkf
       - entrypoint.sh
+      - package.json
+      - package-lock.json
+      - .cli-flags.toml
+      - .dockerignore
+      - 'apps/**'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'config/**'
       - .github/workflows/oci-multiarch.yml
   workflow_dispatch:
 
@@ -48,6 +66,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Prove immutable canonical Dockerfile and wrapper mode
         shell: bash
@@ -61,7 +80,7 @@ jobs:
           grep -Fx 'exec "$@"' entrypoint.sh
           ! grep -En '(^|[[:space:]])(&\||\|&)([[:space:]]|$)|"\$@"[[:space:]]*&|\beval\b|\$\*' entrypoint.sh
 
-      - name: Validate architecture contract
+      - name: Validate architecture and dependency contract
         shell: bash
         env:
           DOCKERFILE: ${{ matrix.dockerfile }}
@@ -76,6 +95,12 @@ jobs:
           grep -F 'FROM --platform=$TARGETPLATFORM ' "${DOCKERFILE}"
           grep -F 'test "${TARGETOS:?TARGETOS is required}" = "linux"' "${DOCKERFILE}"
           grep -F "test \"\${TARGETARCH:?TARGETARCH is required}\" = \"${TARGET_ARCH}\"" "${DOCKERFILE}"
+          grep -Fx 'COPY package.json package-lock.json ./' "${DOCKERFILE}"
+          grep -Fx 'COPY .cli-flags.toml ./' "${DOCKERFILE}"
+          grep -F 'npm ci --omit=dev --ignore-scripts' "${DOCKERFILE}"
+          grep -F 'npm run build:flags2env' "${DOCKERFILE}"
+          grep -Fx 'COPY --from=dependencies --chown=node:node /app/node_modules ./node_modules' "${DOCKERFILE}"
+          ! grep -F 'npm install' "${DOCKERFILE}"
           grep -Fx 'COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh' "${DOCKERFILE}"
           grep -Fx 'ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]' "${DOCKERFILE}"
           grep -Fx 'CMD ["node", "apps/orchestrator/src/main.mjs"]' "${DOCKERFILE}"
@@ -84,9 +109,13 @@ jobs:
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           platforms: arm64
+          image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        with:
+          driver-opts: |
+            image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
 
       - name: Build target image
         shell: bash
@@ -149,7 +178,7 @@ jobs:
             sleep 0.25
           done
           test "$(docker exec "${cid}" cat /proc/1/comm)" = 'sh'
-          docker stop --time 5 "${cid}"
+          docker stop --timeout 5 "${cid}"
           test "$(docker inspect --format '{{.State.ExitCode}}' "${cid}")" = '0'
           docker rm "${cid}"
           trap - EXIT
@@ -196,7 +225,7 @@ jobs:
           test "${healthy}" = 'true'
           test "$(docker inspect --format '{{json .State.Health.Status}}' "${cid}")" != '"unhealthy"'
 
-          docker stop --time 10 "${cid}"
+          docker stop --timeout 10 "${cid}"
           test "$(docker inspect --format '{{.State.ExitCode}}' "${cid}")" = '0'
           docker rm "${cid}"
           trap - EXIT
