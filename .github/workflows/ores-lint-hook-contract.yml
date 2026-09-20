@@ -1,0 +1,41 @@
+name: ores-lint hook contract
+
+on:
+  pull_request:
+    paths:
+      - '.githooks/pre-push'
+      - '.ores-lint/install-git-hooks.sh'
+      - '.ores-lint/test-hook-integration.sh'
+      - '.github/workflows/ores-lint-hook-contract.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.githooks/pre-push'
+      - '.ores-lint/install-git-hooks.sh'
+      - '.ores-lint/test-hook-integration.sh'
+      - '.github/workflows/ores-lint-hook-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ores-lint-hook-contract-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hook-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Shell syntax
+        run: |
+          sh -n .githooks/pre-push
+          sh -n .ores-lint/install-git-hooks.sh
+          sh -n .ores-lint/test-hook-integration.sh
+      - name: Hook ownership contract
+        run: sh .ores-lint/test-hook-integration.sh
