@@ -117,17 +117,21 @@ function evaluateRequiredCiContext(context, candidates, expectedAppId) {
       return evaluateNormalizedCiContext(context, item);
     }
 
-    // Ignore foreign same-name checks/statuses rather than letting them shadow
-    // the trusted App. Absence of the expected App is pending, never success.
+    // Select the newest run from the expected App. A foreign newer same-name
+    // check must not shadow authenticated evidence from the trusted App.
     const trustedChecks = runtimeCandidates.filter((item) => (
       item.source === 'check_run' && Number(item.appId) === Number(expectedAppId)
     ));
     if (trustedChecks.length === 0) {
-      return {
-        context,
-        state: 'pending',
-        reason: `expected App-owned Check Run missing (App ${expectedAppId})`,
-      };
+      const anyCheck = newestCiItem(runtimeCandidates.filter((item) => item.source === 'check_run'));
+      if (anyCheck) {
+        return {
+          context,
+          state: 'failure',
+          reason: `app identity mismatch: expected ${expectedAppId}, received ${anyCheck.appId ?? 'none'}`,
+        };
+      }
+      return { context, state: 'failure', reason: 'App-bound CI requires a GitHub Check Run' };
     }
 
     const item = newestCiItem(trustedChecks);
