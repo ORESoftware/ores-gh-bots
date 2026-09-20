@@ -10,3 +10,9 @@ if [ -z "$zed_bin" ]; then
 fi
 if [ -f .zpkg.lock ]; then "$zed_bin" validate --require-lock; else "$zed_bin" validate; fi
 sh ./conformance/check.sh --full
+lint="$root/.ores-lint/lint.sh"
+if [ ! -f "$lint" ]; then
+  echo "[zed-pre-push] ores-lint entrypoint missing: $lint" >&2
+  exit 1
+fi
+sh "$lint"
