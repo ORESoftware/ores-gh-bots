@@ -30,7 +30,8 @@
     "verify:repository": "node scripts/verify-repository.mjs",
     "verify:github-apps": "node scripts/verify-github-apps.mjs",
     "verify:fleet-hardening": "node scripts/verify-fleet-hardening.mjs",
-    "verify": "npm run verify:repository && npm run verify:github-apps && npm run verify:fleet-hardening",
+    "verify:k8s-images": "node scripts/verify-k8s-image-pins.mjs",
+    "verify": "npm run verify:repository && npm run verify:github-apps && npm run verify:fleet-hardening && npm run verify:k8s-images",
     "ci:classify": "node scripts/classify-workflow-evidence.mjs"
   },
   "comments": {
