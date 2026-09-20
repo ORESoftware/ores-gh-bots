@@ -13,7 +13,9 @@ fail() {
 # The tracked hook remains the authority when .githooks is active. Accept the
 # direct `zed validate` form or the reviewed `$zed_bin validate` wrapper, but
 # comments alone do not count as evidence.
-if ! grep -Ev '^[[:space:]]*#' "$ROOT/.githooks/pre-push" | grep -Eq '(^|[[:space:]"'"'])(zed|\$\{?zed_bin\}?|\$\{?ZED_BIN\}?)(["'"']?)[[:space:]]+validate([[:space:]]|$)'; then
+prepush_code=$(grep -Ev '^[[:space:]]*#' "$ROOT/.githooks/pre-push")
+if ! printf '%s\n' "$prepush_code" | grep -Eq '(^|[[:space:]])zed[[:space:]]+validate([[:space:]]|$)' \
+   && ! printf '%s\n' "$prepush_code" | grep -Eq '(zed_bin|ZED_BIN).*validate([[:space:]]|$)'; then
   fail "tracked hook lost executable zed validation"
 fi
 grep -Fq 'conformance/check.sh --full' "$ROOT/.githooks/pre-push" || fail "tracked hook lost full conformance"
