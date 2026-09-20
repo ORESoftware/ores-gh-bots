@@ -25,7 +25,9 @@ spec:
           type: RuntimeDefault
       containers:
         - name: orchestrator
-          image: ghcr.io/oresoftware/ores-gh-bots:latest
+          # Inactive fail-closed sentinel. Each deployment overlay must replace
+          # this with the immutable digest of a published, verified image.
+          image: ghcr.io/oresoftware/ores-gh-bots@sha256:0000000000000000000000000000000000000000000000000000000000000000
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

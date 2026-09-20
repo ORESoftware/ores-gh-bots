@@ -4,4 +4,5 @@ resources:
   - ../../base
 images:
   - name: ghcr.io/oresoftware/ores-gh-bots
-    newTag: v0.1.0
+    # Inactive fail-closed sentinel. Replace with the verified published digest.
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
