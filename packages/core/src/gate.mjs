@@ -66,24 +66,43 @@ function evaluateProjectionAdmission(kind, candidates, projectionContext) {
   return { projectionKind: kind, state: 'success', reason: 'exact Contract IR evidence admitted' };
 }
 
+function evaluateNormalizedCiContext(context, item) {
+  if (['queued', 'in_progress', 'pending', 'requested', 'waiting', 'expected'].includes(item.state)) {
+    return { context, state: 'pending', reason: item.state };
+  }
+  if (item.state === 'success') return { context, state: 'success', reason: 'success' };
+  return { context, state: 'failure', reason: item.state };
+}
+
 function evaluateRequiredCiContext(context, item, expectedAppId) {
   if (!item) return { context, state: 'pending', reason: 'missing' };
 
-  // App-bound contexts are authenticated evidence families, not generic GitHub
-  // branch-protection contexts. They must be a real Check Run from the expected
-  // App and must carry GitHub's raw terminal `completed/success` state. Do not
-  // allow generic normalization of neutral/skipped or a same-name PAT status to
-  // satisfy this stronger contract.
   if (expectedAppId !== null) {
-    if (item.source !== 'check_run') {
-      return { context, state: 'failure', reason: 'App-bound CI requires a GitHub Check Run' };
-    }
     if (Number(item.appId) !== Number(expectedAppId)) {
       return {
         context,
         state: 'failure',
         reason: `app identity mismatch: expected ${expectedAppId}, received ${item.appId ?? 'none'}`,
       };
+    }
+
+    const hasTransportProvenance = (
+      item.source !== undefined || item.rawStatus !== undefined || item.rawConclusion !== undefined
+    );
+
+    // Runtime GitHub snapshots are authenticated evidence families, not generic
+    // branch-protection contexts. Once transport provenance is present, require
+    // a real Check Run from the expected App with GitHub's raw terminal
+    // `completed/success` state. This prevents neutral/skipped normalization or
+    // a same-name PAT status from satisfying an App-bound context.
+    //
+    // `evaluateGate` is also a pure function used by older unit fixtures that
+    // inject already-normalized CI objects directly. Those provenance-less
+    // synthetic objects retain normalized semantics; the production path always
+    // enters here through getCiSnapshot(), which supplies source/raw fields.
+    if (!hasTransportProvenance) return evaluateNormalizedCiContext(context, item);
+    if (item.source !== 'check_run') {
+      return { context, state: 'failure', reason: 'App-bound CI requires a GitHub Check Run' };
     }
     if (item.rawStatus !== 'completed') {
       if (['queued', 'in_progress', 'pending', 'requested', 'waiting', 'expected'].includes(item.rawStatus)) {
@@ -105,11 +124,7 @@ function evaluateRequiredCiContext(context, item, expectedAppId) {
     return { context, state: 'success', reason: 'App-owned completed/success Check Run' };
   }
 
-  if (['queued', 'in_progress', 'pending', 'requested', 'waiting', 'expected'].includes(item.state)) {
-    return { context, state: 'pending', reason: item.state };
-  }
-  if (item.state === 'success') return { context, state: 'success', reason: 'success' };
-  return { context, state: 'failure', reason: item.state };
+  return evaluateNormalizedCiContext(context, item);
 }
 
 export function evaluateGate({
