@@ -93,7 +93,6 @@ async function discoverRepositories({ client, auth, config, policy }) {
         defaultBranch: repository.default_branch,
         private: Boolean(repository.private),
         installationId: installation.id,
-        token,
       });
       if (repositories.length >= policy.maxRepositories) break;
     }
@@ -101,7 +100,7 @@ async function discoverRepositories({ client, auth, config, policy }) {
   return repositories.sort((left, right) => left.fullName.localeCompare(right.fullName));
 }
 
-function trustedPlaceholderSnapshot(pullRequest, gateAppId, gateExternalId) {
+function trustedPlaceholderSnapshot(pullRequest, gateAppId, gateExternalId, policy) {
   return {
     gateCheck: {
       name: CHECK_NAMES.gate,
@@ -112,7 +111,14 @@ function trustedPlaceholderSnapshot(pullRequest, gateAppId, gateExternalId) {
       app: { id: gateAppId },
     },
     ciStates: [{ context: 'merge-reaper/static-preflight', state: 'success' }],
-    reviews: [],
+    reviews: policy.requireHumanApproval
+      ? [{
+        id: 1,
+        state: 'APPROVED',
+        submitted_at: '1970-01-01T00:00:00.000Z',
+        user: { login: 'merge-reaper-static-preflight', type: 'User' },
+      }]
+      : [],
     unresolvedReviewThreads: 0,
   };
 }
@@ -130,7 +136,7 @@ async function inspectPullRequest({ client, token, repository, listedPullRequest
     policy,
     now,
     expectedGateAppId: gateAppId,
-    ...trustedPlaceholderSnapshot(pullRequest, gateAppId, gateExternalId),
+    ...trustedPlaceholderSnapshot(pullRequest, gateAppId, gateExternalId, policy),
   });
   if (!staticEvaluation.eligible) {
     return {
@@ -246,10 +252,11 @@ function publicCandidate(candidate) {
   };
 }
 
-async function freshInspection({ candidate, repository, client, policy, gateAppId }) {
+async function freshInspection({ candidate, repository, client, auth, policy, gateAppId }) {
+  const token = await auth.installationToken('reaper', repository.installationId);
   return inspectPullRequest({
     client,
-    token: repository.token,
+    token,
     repository,
     listedPullRequest: { number: candidate.number },
     policy,
@@ -302,16 +309,18 @@ async function main() {
   const candidates = [];
   let observedPullRequests = 0;
   for (const repository of repositories) {
-    const pulls = await listOpenPullRequests(client, repository.token, repository.owner, repository.repo, policy.maxPullRequestsPerRepository);
+    const listToken = await auth.installationToken('reaper', repository.installationId);
+    const pulls = await listOpenPullRequests(client, listToken, repository.owner, repository.repo, policy.maxPullRequestsPerRepository);
     observedPullRequests += pulls.length;
     const headBranches = new Map(pulls.map((pullRequest) => [pullRequest.head?.ref, pullRequest]));
     for (const listedPullRequest of pulls) {
       const stackedBase = headBranches.get(listedPullRequest.base?.ref);
       const stackedDependency = stackedBase ? pullRequestKey(repository.owner, repository.repo, stackedBase.number) : null;
       try {
+        const token = await auth.installationToken('reaper', repository.installationId);
         candidates.push(await inspectPullRequest({
           client,
-          token: repository.token,
+          token,
           repository,
           listedPullRequest,
           policy,
@@ -367,7 +376,7 @@ async function main() {
       }
       const repository = repositoryByName.get(candidate.repository);
       try {
-        const fresh = await freshInspection({ candidate, repository, client, policy, gateAppId });
+        const fresh = await freshInspection({ candidate, repository, client, auth, policy, gateAppId });
         const dependencyStates = Object.fromEntries(candidate.dependencies.map((dependency) => [
           dependency,
           candidateByKey.has(dependency)
@@ -388,7 +397,8 @@ async function main() {
           mergeResults.push({ key: candidate.key, merged: false, reason: `fresh-policy-rejection:${fresh.evaluation.reasons.join(',')}` });
           continue;
         }
-        const result = await mergePullRequestExact(client, repository.token, repository.owner, repository.repo, candidate.number, {
+        const mergeToken = await auth.installationToken('reaper', repository.installationId);
+        const result = await mergePullRequestExact(client, mergeToken, repository.owner, repository.repo, candidate.number, {
           expectedHeadSha: fresh.headSha,
           method: policy.mergeMethod,
           commitTitle: `${fresh.title} (#${fresh.number})`,
