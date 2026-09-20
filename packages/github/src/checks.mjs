@@ -189,10 +189,10 @@ function normalizeCheckState(check) {
 }
 
 export async function getCiSnapshot(client, token, owner, repo, headSha) {
-  // `filter=all` is intentional. App-bound admission selects the newest run from
-  // the expected App; asking GitHub for only a pre-collapsed "latest" view can
-  // hide that trusted run behind a same-name run from another check suite/App.
-  const checksResponse = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/check-runs?filter=all&per_page=100`, { token });
+  // Check suites are App-scoped. Keep GitHub's latest check-suite view, then
+  // preserve one newest run per (context, App) locally so a foreign same-name
+  // App cannot shadow the expected App's evidence during admission.
+  const checksResponse = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/check-runs?filter=latest&per_page=100`, { token });
   const statusesResponse = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/status`, { token });
 
   const checks = new Map();
