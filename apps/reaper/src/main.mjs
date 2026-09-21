@@ -31,6 +31,7 @@ import {
   listOpenPullRequests,
   mergePullRequestExact,
 } from '../../../packages/github/src/index.mjs';
+import { resolveFreshDependencyStates } from './dependency-states.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const modulePath = fileURLToPath(import.meta.url);
@@ -254,7 +255,7 @@ function publicCandidate(candidate) {
 
 async function freshInspection({ candidate, repository, client, auth, policy, gateAppId }) {
   const token = await auth.installationToken('reaper', repository.installationId);
-  return inspectPullRequest({
+  const fresh = await inspectPullRequest({
     client,
     token,
     repository,
@@ -262,8 +263,23 @@ async function freshInspection({ candidate, repository, client, auth, policy, ga
     policy,
     gateAppId,
     now: new Date(),
-    stackedDependency: candidate.dependencies.find((dependency) => dependency.startsWith(`${candidate.repository}#`)),
+    stackedDependency: null,
   });
+  const pulls = await listOpenPullRequests(
+    client,
+    token,
+    repository.owner,
+    repository.repo,
+    policy.maxPullRequestsPerRepository,
+  );
+  const stackedBase = pulls.find((pullRequest) => (
+    pullRequest.number !== fresh.number && pullRequest.head?.ref === fresh.baseBranch
+  ));
+  fresh.dependencies = unique([
+    ...fresh.dependencies,
+    ...(stackedBase ? [pullRequestKey(repository.owner, repository.repo, stackedBase.number)] : []),
+  ]).filter((dependency) => dependency !== fresh.key).sort();
+  return fresh;
 }
 
 async function main() {
@@ -377,12 +393,18 @@ async function main() {
       const repository = repositoryByName.get(candidate.repository);
       try {
         const fresh = await freshInspection({ candidate, repository, client, auth, policy, gateAppId });
-        const dependencyStates = Object.fromEntries(candidate.dependencies.map((dependency) => [
-          dependency,
-          candidateByKey.has(dependency)
-            ? (mergedKeys.has(dependency) ? 'merged' : 'candidate-blocked')
-            : (candidate.dependencyStates?.[dependency] ?? 'unavailable'),
-        ]));
+        const dependencyCache = new Map();
+        const dependencyStates = await resolveFreshDependencyStates({
+          freshDependencies: fresh.dependencies,
+          mergedKeys,
+          resolveLiveDependency: (dependency) => resolveDependency({
+            dependency,
+            candidateByKey: new Map(),
+            auth,
+            client,
+            cache: dependencyCache,
+          }),
+        });
         if (fresh.inspection === 'full') {
           fresh.evaluation = evaluateMergeCandidate({
             pullRequest: fresh.pullRequest,
