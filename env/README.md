@@ -11,7 +11,9 @@ The committed source is `env/enc/review-bots.env`. Plaintext is written only to 
 5. Export the same public recipient as `SOPS_AGE_RECIPIENTS` and run `just encrypt-env`.
 6. Commit `.sops.yaml` and the SOPS document under `env/enc/`. Never commit anything under `env/dec/`.
 
-The five manifest-conversion fragments are written under ignored `env/dec/registrations/` by `just app-convert ROLE CODE`. Copy their generated values into `env/dec/review-bots.env`, add provider credentials, validate, encrypt, then securely delete obsolete fragments.
+The seven manifest-conversion fragments are written under ignored `env/dec/registrations/` by the `just app-convert` flow for `orchestrator`, `openai`, `claude`, `gate`, `actions`, `reaper`, and `hardening`. Copy their generated values into `env/dec/review-bots.env`, add provider credentials, validate, encrypt, then securely delete obsolete fragments.
+
+Keep the Gate, Merge Reaper, and Fleet Hardening credentials distinct. A duplicate App identity across those effect/certification roles defeats the intended authority split even if the PEM values differ.
 
 ## Routine use
 
