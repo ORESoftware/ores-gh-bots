@@ -1,21 +1,18 @@
 name: repair reaper fresh dependency boundary once
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/fix-merge-reaper-fresh-deps-once.yml'
   push:
     branches:
       - salvage/merge-reaper-runtime-20260920
     paths:
       - '.github/workflows/fix-merge-reaper-fresh-deps-once.yml'
+      - '.github/patches/reaper-fresh-dependency-boundary.patch'
 
 permissions:
   contents: write
 
 jobs:
   repair:
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -29,126 +26,23 @@ jobs:
         with:
           node-version: '22.16.0'
           package-manager-cache: false
-      - name: Patch final dependency decision to fresh PR metadata
+      - name: Apply reviewed source patch
         run: |
           set -euo pipefail
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs';
-
-          const sourcePath = 'apps/reaper/src/main.mjs';
-          let source = readFileSync(sourcePath, 'utf8');
-
-          const freshStart = source.indexOf('async function freshInspection(');
-          const freshEnd = source.indexOf('\nasync function main()', freshStart);
-          if (freshStart < 0 || freshEnd < 0) throw new Error('freshInspection source shape changed');
-          const freshReplacement = `export async function resolveFreshDependencyStates({ freshDependencies, mergedKeys, resolveLiveDependency }) {
-            const dependencyStates = {};
-            for (const dependency of freshDependencies) {
-              dependencyStates[dependency] = mergedKeys.has(dependency)
-                ? 'merged'
-                : await resolveLiveDependency(dependency);
-            }
-            return dependencyStates;
-          }
-
-          async function freshInspection({ candidate, repository, client, auth, policy, gateAppId }) {
-            const token = await auth.installationToken('reaper', repository.installationId);
-            const fresh = await inspectPullRequest({
-              client,
-              token,
-              repository,
-              listedPullRequest: { number: candidate.number },
-              policy,
-              gateAppId,
-              now: new Date(),
-              stackedDependency: null,
-            });
-            const pulls = await listOpenPullRequests(
-              client,
-              token,
-              repository.owner,
-              repository.repo,
-              policy.maxPullRequestsPerRepository,
-            );
-            const stackedBase = pulls.find((pullRequest) => (
-              pullRequest.number !== fresh.number && pullRequest.head?.ref === fresh.baseBranch
-            ));
-            fresh.dependencies = unique([
-              ...fresh.dependencies,
-              ...(stackedBase ? [pullRequestKey(repository.owner, repository.repo, stackedBase.number)] : []),
-            ]).filter((dependency) => dependency !== fresh.key).sort();
-            return fresh;
-          }
-          `;
-          source = source.slice(0, freshStart) + freshReplacement + source.slice(freshEnd + 1);
-
-          const applyStart = source.indexOf('      const unmetInBatch = candidate.dependencies.filter(');
-          const applyEnd = source.indexOf('        if (fresh.inspection === \'full\') {', applyStart);
-          if (applyStart < 0 || applyEnd < 0) throw new Error('apply dependency source shape changed');
-          const applyReplacement = `      const repository = repositoryByName.get(candidate.repository);
-            try {
-              const fresh = await freshInspection({ candidate, repository, client, auth, policy, gateAppId });
-              const dependencyCache = new Map();
-              const dependencyStates = await resolveFreshDependencyStates({
-                freshDependencies: fresh.dependencies,
-                mergedKeys,
-                resolveLiveDependency: (dependency) => resolveDependency({
-                  dependency,
-                  candidateByKey: new Map(),
-                  auth,
-                  client,
-                  cache: dependencyCache,
-                }),
-              });
-          `;
-          source = source.slice(0, applyStart) + applyReplacement + source.slice(applyEnd);
-          writeFileSync(sourcePath, source);
-
-          const testPath = 'test/merge-reaper-runtime.test.mjs';
-          let testSource = readFileSync(testPath, 'utf8');
-          const importLine = "import { resolveFreshDependencyStates } from '../apps/reaper/src/main.mjs';\n";
-          if (!testSource.includes(importLine)) {
-            testSource = testSource.replace(
-              "import { readFile } from 'node:fs/promises';\n",
-              "import { readFile } from 'node:fs/promises';\n" + importLine,
-            );
-          }
-          if (!testSource.includes('final dependency resolution uses the fresh dependency set')) {
-            testSource += `
-
-test('final dependency resolution uses the fresh dependency set, not the initial snapshot', async () => {
-  const calls = [];
-  const states = await resolveFreshDependencyStates({
-    freshDependencies: ['oresoftware/already-merged#1', 'oresoftware/newly-added#2'],
-    mergedKeys: new Set(['oresoftware/already-merged#1']),
-    resolveLiveDependency: async (dependency) => {
-      calls.push(dependency);
-      return 'open';
-    },
-  });
-
-  assert.deepEqual(states, {
-    'oresoftware/already-merged#1': 'merged',
-    'oresoftware/newly-added#2': 'open',
-  });
-  assert.deepEqual(calls, ['oresoftware/newly-added#2']);
-});
-`;
-          }
-          writeFileSync(testPath, testSource);
-          NODE
-      - name: Verify repaired runtime
+          git apply --check .github/patches/reaper-fresh-dependency-boundary.patch
+          git apply .github/patches/reaper-fresh-dependency-boundary.patch
+          git diff --check
+      - name: Verify merge-reaper tests
         run: |
           set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund
-          git diff --check
           node --test test/merge-reaper.test.mjs test/merge-reaper-runtime.test.mjs
-      - name: Commit repaired runtime and regression
+      - name: Commit repaired runtime
         run: |
           set -euo pipefail
           git config user.name ORESoftware
           git config user.email noreply@github.com
-          git add apps/reaper/src/main.mjs test/merge-reaper-runtime.test.mjs
+          git add apps/reaper/src/main.mjs
           git diff --cached --check
           git commit -m 'fix(reaper): resolve fresh dependencies at merge boundary'
           git push origin HEAD:salvage/merge-reaper-runtime-20260920
