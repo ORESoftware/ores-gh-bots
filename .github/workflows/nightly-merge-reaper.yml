@@ -1,0 +1,149 @@
+name: Nightly dependency-aware PR merge reaper
+
+on:
+  schedule:
+    # GitHub cron is UTC. These two candidates cover 01:07 America/Chicago
+    # across DST; the local-time gate admits only the first matching occurrence.
+    - cron: '7 6 * * *'
+    - cron: '7 7 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Plan only or apply up to three exact-head merges
+        required: true
+        type: choice
+        default: plan
+        options:
+          - plan
+          - apply
+      confirm:
+        description: Required MERGE-* acknowledgement for apply mode
+        required: false
+        type: string
+      minimum_age_hours:
+        description: Minimum PR age
+        required: true
+        type: number
+        default: 55
+      max_merges:
+        description: Maximum merge effects; policy hard-caps this at three
+        required: true
+        type: number
+        default: 3
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-dependency-aware-pr-merge-reaper
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  local-time-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        name: Admit manual runs or first 01:07 America/Chicago occurrence
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          node <<'NODE'
+          const eventName = process.env.EVENT_NAME;
+          const formatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'America/Chicago',
+            hour: '2-digit',
+            hourCycle: 'h23',
+          });
+          const now = new Date();
+          const previous = new Date(now.getTime() - 60 * 60 * 1000);
+          const currentHour = Number(formatter.format(now));
+          const previousHour = Number(formatter.format(previous));
+          // During the repeated fall-back hour, the second 01:07 has another
+          // local 01:xx exactly one hour before it; reject that duplicate.
+          const admitted = eventName === 'workflow_dispatch'
+            || (currentHour === 1 && previousHour !== 1);
+          require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, `run=${admitted ? 'true' : 'false'}\n`);
+          NODE
+
+  reap:
+    needs: local-time-gate
+    if: needs.local-time-gate.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      OWNER_ALLOWLIST: ${{ vars.OWNER_ALLOWLIST }}
+      OWNER_PATTERNS: ${{ vars.OWNER_PATTERNS }}
+      GATE_APP_ID: ${{ secrets.GATE_APP_ID }}
+      MERGE_REAPER_APP_ID: ${{ secrets.MERGE_REAPER_APP_ID }}
+      MERGE_REAPER_APP_PRIVATE_KEY: ${{ secrets.MERGE_REAPER_APP_PRIVATE_KEY }}
+      MERGE_REAPER_POLICY: config/merge-reaper.example.json
+      MERGE_REAPER_MIN_AGE_HOURS: ${{ inputs.minimum_age_hours || '55' }}
+      MERGE_REAPER_MAX_MERGES: ${{ inputs.max_merges || '3' }}
+      MERGE_REAPER_MAX_REPOSITORIES: '2000'
+      MERGE_REAPER_MAX_PRS_PER_REPOSITORY: '100'
+      MERGE_REAPER_OUTPUT: merge-reaper-report.json
+    steps:
+      - name: Check out exact workflow revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
+          cache: npm
+
+      - name: Install exact lockfile without dependency lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Build reviewed flags2env native boundary
+        run: npm run build:flags2env
+
+      - name: Verify repository before any merge effect
+        run: npm run check && npm run verify
+
+      - name: Render no-write merge plan
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'plan'
+        run: node apps/reaper/src/main.mjs reaper plan >/dev/null
+
+      - name: Apply reviewed exact-head merge policy
+        if: github.event_name == 'schedule' || inputs.mode == 'apply'
+        env:
+          MERGE_REAPER_CONFIRM: ${{ github.event_name == 'schedule' && 'MERGE-NIGHTLY-SCHEDULED' || inputs.confirm }}
+        run: node apps/reaper/src/main.mjs reaper apply >/dev/null
+
+      - name: Render redacted public decision receipt
+        if: always() && hashFiles('merge-reaper-report.json') != ''
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('merge-reaper-report.json', 'utf8'));
+          const receipt = {
+            version: report.version,
+            generatedAt: report.generatedAt,
+            mode: report.mode,
+            policy: report.policy,
+            summary: report.summary,
+            privateMetadataRedacted: true,
+          };
+          fs.writeFileSync('merge-reaper-public-report.json', `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
+          fs.rmSync('merge-reaper-report.json');
+          NODE
+
+      - name: Upload redacted decision receipt
+        if: always() && hashFiles('merge-reaper-public-report.json') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: merge-reaper-public-report-${{ github.run_id }}
+          path: merge-reaper-public-report.json
+          if-no-files-found: error
+          retention-days: 30
