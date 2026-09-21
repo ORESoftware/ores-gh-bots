@@ -1,0 +1,79 @@
+diff --git a/apps/reaper/src/main.mjs b/apps/reaper/src/main.mjs
+--- a/apps/reaper/src/main.mjs
++++ b/apps/reaper/src/main.mjs
+@@ -255,13 +255,38 @@
+-async function freshInspection({ candidate, repository, client, auth, policy, gateAppId }) {
+-  const token = await auth.installationToken('reaper', repository.installationId);
+-  return inspectPullRequest({
+-    client,
+-    token,
+-    repository,
+-    listedPullRequest: { number: candidate.number },
+-    policy,
+-    gateAppId,
+-    now: new Date(),
+-    stackedDependency: candidate.dependencies.find((dependency) => dependency.startsWith(`${candidate.repository}#`)),
+-  });
++export async function resolveFreshDependencyStates({ freshDependencies, mergedKeys, resolveLiveDependency }) {
++  const dependencyStates = {};
++  for (const dependency of freshDependencies) {
++    dependencyStates[dependency] = mergedKeys.has(dependency)
++      ? 'merged'
++      : await resolveLiveDependency(dependency);
++  }
++  return dependencyStates;
++}
++
++async function freshInspection({ candidate, repository, client, auth, policy, gateAppId }) {
++  const token = await auth.installationToken('reaper', repository.installationId);
++  const fresh = await inspectPullRequest({
++    client,
++    token,
++    repository,
++    listedPullRequest: { number: candidate.number },
++    policy,
++    gateAppId,
++    now: new Date(),
++    stackedDependency: null,
++  });
++  const pulls = await listOpenPullRequests(
++    client,
++    token,
++    repository.owner,
++    repository.repo,
++    policy.maxPullRequestsPerRepository,
++  );
++  const stackedBase = pulls.find((pullRequest) => (
++    pullRequest.number !== fresh.number && pullRequest.head?.ref === fresh.baseBranch
++  ));
++  fresh.dependencies = unique([
++    ...fresh.dependencies,
++    ...(stackedBase ? [pullRequestKey(repository.owner, repository.repo, stackedBase.number)] : []),
++  ]).filter((dependency) => dependency !== fresh.key).sort();
++  return fresh;
+ }
+ 
+ async function main() {
+@@ -378,9 +403,15 @@
+       const repository = repositoryByName.get(candidate.repository);
+       try {
+         const fresh = await freshInspection({ candidate, repository, client, auth, policy, gateAppId });
+-        const dependencyStates = Object.fromEntries(candidate.dependencies.map((dependency) => [
+-          dependency,
+-          candidateByKey.has(dependency)
+-            ? (mergedKeys.has(dependency) ? 'merged' : 'candidate-blocked')
+-            : (candidate.dependencyStates?.[dependency] ?? 'unavailable'),
+-        ]));
++        const dependencyCache = new Map();
++        const dependencyStates = await resolveFreshDependencyStates({
++          freshDependencies: fresh.dependencies,
++          mergedKeys,
++          resolveLiveDependency: (dependency) => resolveDependency({
++            dependency,
++            candidateByKey: new Map(),
++            auth,
++            client,
++            cache: dependencyCache,
++          }),
++        });
+         if (fresh.inspection === 'full') {
