@@ -1,7 +1,7 @@
 diff --git a/apps/reaper/src/main.mjs b/apps/reaper/src/main.mjs
 --- a/apps/reaper/src/main.mjs
 +++ b/apps/reaper/src/main.mjs
-@@ -255,13 +255,38 @@
+@@ -255,16 +255,41 @@
 -async function freshInspection({ candidate, repository, client, auth, policy, gateAppId }) {
 -  const token = await auth.installationToken('reaper', repository.installationId);
 -  return inspectPullRequest({
