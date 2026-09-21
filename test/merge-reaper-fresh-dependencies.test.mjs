@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveFreshDependencyStates } from '../apps/reaper/src/main.mjs';
+import { resolveFreshDependencyStates } from '../apps/reaper/src/dependency-states.mjs';
 
 test('final dependency resolution uses the fresh dependency set', async () => {
   const calls = [];
