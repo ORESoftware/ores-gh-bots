@@ -6,7 +6,6 @@ on:
       - salvage/merge-reaper-runtime-20260920
     paths:
       - '.github/workflows/fix-merge-reaper-fresh-deps-once.yml'
-      - '.github/patches/reaper-fresh-dependency-boundary.patch'
 
 permissions:
   contents: write
@@ -26,17 +25,105 @@ jobs:
         with:
           node-version: '22.16.0'
           package-manager-cache: false
-      - name: Apply reviewed source patch
+      - name: Rewrite final dependency boundary from reviewed exact source
         run: |
           set -euo pipefail
-          git apply --check .github/patches/reaper-fresh-dependency-boundary.patch
-          git apply .github/patches/reaper-fresh-dependency-boundary.patch
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('apps/reaper/src/main.mjs')
+          source = path.read_text()
+
+          old_fresh = '''async function freshInspection({ candidate, repository, client, auth, policy, gateAppId }) {
+            const token = await auth.installationToken('reaper', repository.installationId);
+            return inspectPullRequest({
+              client,
+              token,
+              repository,
+              listedPullRequest: { number: candidate.number },
+              policy,
+              gateAppId,
+              now: new Date(),
+              stackedDependency: candidate.dependencies.find((dependency) => dependency.startsWith(`${candidate.repository}#`)),
+            });
+          }'''
+
+          new_fresh = '''export async function resolveFreshDependencyStates({ freshDependencies, mergedKeys, resolveLiveDependency }) {
+            const dependencyStates = {};
+            for (const dependency of freshDependencies) {
+              dependencyStates[dependency] = mergedKeys.has(dependency)
+                ? 'merged'
+                : await resolveLiveDependency(dependency);
+            }
+            return dependencyStates;
+          }
+
+          async function freshInspection({ candidate, repository, client, auth, policy, gateAppId }) {
+            const token = await auth.installationToken('reaper', repository.installationId);
+            const fresh = await inspectPullRequest({
+              client,
+              token,
+              repository,
+              listedPullRequest: { number: candidate.number },
+              policy,
+              gateAppId,
+              now: new Date(),
+              stackedDependency: null,
+            });
+            const pulls = await listOpenPullRequests(
+              client,
+              token,
+              repository.owner,
+              repository.repo,
+              policy.maxPullRequestsPerRepository,
+            );
+            const stackedBase = pulls.find((pullRequest) => (
+              pullRequest.number !== fresh.number && pullRequest.head?.ref === fresh.baseBranch
+            ));
+            fresh.dependencies = unique([
+              ...fresh.dependencies,
+              ...(stackedBase ? [pullRequestKey(repository.owner, repository.repo, stackedBase.number)] : []),
+            ]).filter((dependency) => dependency !== fresh.key).sort();
+            return fresh;
+          }'''
+
+          old_states = '''        const dependencyStates = Object.fromEntries(candidate.dependencies.map((dependency) => [
+                    dependency,
+                    candidateByKey.has(dependency)
+                      ? (mergedKeys.has(dependency) ? 'merged' : 'candidate-blocked')
+                      : (candidate.dependencyStates?.[dependency] ?? 'unavailable'),
+                  ]));'''
+
+          new_states = '''        const dependencyCache = new Map();
+                  const dependencyStates = await resolveFreshDependencyStates({
+                    freshDependencies: fresh.dependencies,
+                    mergedKeys,
+                    resolveLiveDependency: (dependency) => resolveDependency({
+                      dependency,
+                      candidateByKey: new Map(),
+                      auth,
+                      client,
+                      cache: dependencyCache,
+                    }),
+                  });'''
+
+          if old_fresh not in source:
+              raise SystemExit('freshInspection exact source did not match; refusing blind rewrite')
+          if old_states not in source:
+              raise SystemExit('final dependency-state exact source did not match; refusing blind rewrite')
+
+          source = source.replace(old_fresh, new_fresh, 1).replace(old_states, new_states, 1)
+          path.write_text(source)
+          PY
           git diff --check
-      - name: Verify merge-reaper tests
+      - name: Verify merge-reaper tests including mutable-metadata regression
         run: |
           set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund
-          node --test test/merge-reaper.test.mjs test/merge-reaper-runtime.test.mjs
+          node --test \
+            test/merge-reaper.test.mjs \
+            test/merge-reaper-runtime.test.mjs \
+            test/merge-reaper-fresh-dependencies.test.mjs
       - name: Commit repaired runtime
         run: |
           set -euo pipefail
