@@ -22,12 +22,14 @@ GitHub App identity is the App ID, not an individual private key. Rotate without
 
 1. Generate a second private key on the existing App registration. Do not revoke the active key yet.
 2. Decrypt the runtime secret, replace only that role's PEM, validate, re-encrypt, and deploy.
-3. Verify the new deployment can mint an App JWT, resolve every expected installation, mint installation tokens, and perform that role's non-destructive canary operation. For the merge reaper, use `reaper plan`; do not use a merge as a key-rotation probe.
+3. Verify the new deployment can mint an App JWT, resolve every expected installation, mint installation tokens, and perform that role's non-destructive canary operation. For the merge reaper, use `reaper plan`; do not use a merge as a key-rotation probe. For fleet hardening, use `hardening plan` against one paired test organization; do not use apply as a key-rotation probe.
 4. Confirm the persistent queue path is unchanged and pending jobs continue on the same storage.
 5. Revoke the old key in GitHub.
 6. Record the App role, unchanged App ID, deployment revision, operator, reason, verification evidence, and old-key revocation time in the deployment audit log. Never record key material.
 
-This overlap is mandatory for orchestrator, OpenAI reviewer, Claude reviewer, review gate, Actions dispatcher, and merge-reaper rotations.
+This overlap is mandatory for orchestrator, OpenAI reviewer, Claude reviewer, review gate, Actions dispatcher, merge-reaper, and fleet-hardening rotations.
+
+The Gate, Merge Reaper, and Fleet Hardening Apps are separate authorities. Do not collapse their App IDs or private keys: the Gate certifies review state, the Reaper may exercise an exact-SHA merge after policy admission, and Fleet Hardening can only create proposal branches and pull requests.
 
 ## Webhook-secret rotation
 
@@ -43,10 +45,10 @@ Add the new public recipient to `.sops.yaml` before removing the old one. An ope
 
 ## Revocation and incident response
 
-1. Disable ruleset expansion and scheduled merge-reaper application; keep existing rulesets active unless documented business continuity requires evaluate mode.
+1. Disable ruleset expansion, scheduled merge-reaper application, and fleet-hardening apply operations; keep existing rulesets active unless documented business continuity requires evaluate mode.
 2. Revoke the suspected provider key or GitHub App private key immediately. Suspending an affected App installation is preferable to deleting the App identity.
 3. Replace and deploy the secret through SOPS. Do not paste emergency credentials into GitHub, Linear, Slack, or email.
 4. Reconcile open pull requests so every current head SHA receives fresh checks from the restored identities.
-5. Review webhook rejection, provider error, dead-letter, installation-token, merge-reaper, and audit logs for the exposure window.
+5. Review webhook rejection, provider error, dead-letter, installation-token, merge-reaper, fleet-hardening proposal, and audit logs for the exposure window.
 6. Rotate the Age envelope if an operator identity or decrypted file may have been exposed.
 7. Document scope, timestamps, affected App IDs/installations, evidence, and corrective actions without including secrets.
