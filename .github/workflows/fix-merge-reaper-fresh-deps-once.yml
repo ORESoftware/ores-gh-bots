@@ -34,6 +34,13 @@ jobs:
           path = Path('apps/reaper/src/main.mjs')
           source = path.read_text()
 
+          import_anchor = "} from '../../../packages/github/src/index.mjs';\n"
+          import_line = "import { resolveFreshDependencyStates } from './dependency-states.mjs';\n"
+          if import_line not in source:
+              if import_anchor not in source:
+                  raise SystemExit('GitHub import anchor changed; refusing blind rewrite')
+              source = source.replace(import_anchor, import_anchor + import_line, 1)
+
           old_fresh = '''async function freshInspection({ candidate, repository, client, auth, policy, gateAppId }) {
             const token = await auth.installationToken('reaper', repository.installationId);
             return inspectPullRequest({
@@ -48,17 +55,7 @@ jobs:
             });
           }'''
 
-          new_fresh = '''export async function resolveFreshDependencyStates({ freshDependencies, mergedKeys, resolveLiveDependency }) {
-            const dependencyStates = {};
-            for (const dependency of freshDependencies) {
-              dependencyStates[dependency] = mergedKeys.has(dependency)
-                ? 'merged'
-                : await resolveLiveDependency(dependency);
-            }
-            return dependencyStates;
-          }
-
-          async function freshInspection({ candidate, repository, client, auth, policy, gateAppId }) {
+          new_fresh = '''async function freshInspection({ candidate, repository, client, auth, policy, gateAppId }) {
             const token = await auth.installationToken('reaper', repository.installationId);
             const fresh = await inspectPullRequest({
               client,
