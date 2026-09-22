@@ -74,3 +74,10 @@ test('canonical hardening CLI binds plans to the admission wrapper implementatio
   assert.match(legacy, /Legacy direct fleet-hardening apply is disabled/u);
   assert.match(legacy, /Direct default-branch file writes are forbidden/u);
 });
+
+test('private fleet plans, receipts, and local outputs are ignored by git', async () => {
+  const gitignore = await read('.gitignore');
+  assert.match(gitignore, /^fleet-hardening-\*\.json$/mu);
+  assert.match(gitignore, /^plans\/fleet-hardening\/$/mu);
+  assert.match(gitignore, /^receipts\/fleet-hardening\/$/mu);
+});
