@@ -12,6 +12,13 @@ env/dec/*
 result/
 .DS_Store
 
+# Local/private fleet-hardening plans, canary receipts, and ledgers. These may
+# contain private repository names and exact head SHAs and must never be
+# committed to this public repository.
+fleet-hardening-*.json
+plans/fleet-hardening/
+receipts/fleet-hardening/
+
 # nightly reconciler / hygiene / typecheck artifacts
 dist/
 *.tsbuildinfo
