@@ -75,6 +75,19 @@ test('canonical hardening CLI binds plans to the admission wrapper implementatio
   assert.match(legacy, /Direct default-branch file writes are forbidden/u);
 });
 
+test('hardening runtime has no merge path and ORES rulesets grant no bypass actors', async () => {
+  const [planner, admission, hardeningCli, rulesets] = await Promise.all([
+    read('packages/github/src/fleet-hardening-plan.mjs'),
+    read('packages/github/src/fleet-hardening-plan-admission.mjs'),
+    read('apps/cli/src/hardening.mjs'),
+    read('packages/github/src/rulesets.mjs'),
+  ]);
+  for (const source of [planner, admission, hardeningCli]) {
+    assert.doesNotMatch(source, /mergePullRequestExact|\/merge(?:['"`?])/u);
+  }
+  assert.match(rulesets, /bypass_actors:\s*\[\]/u);
+});
+
 test('private fleet plans, receipts, and local outputs are ignored by git', async () => {
   const gitignore = await read('.gitignore');
   assert.match(gitignore, /^fleet-hardening-\*\.json$/mu);
