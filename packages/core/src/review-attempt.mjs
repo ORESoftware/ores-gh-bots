@@ -3,6 +3,9 @@ import { createHash } from 'node:crypto';
 const HEAD_SHA = /^[0-9a-f]{40}$/u;
 const PROVIDER = /^(?:openai|claude)$/u;
 const ATTEMPT_ID = /^[0-9a-f]{32}$/u;
+const REVIEW_VERDICT = /^(?:approve|comment|request_changes)$/u;
+const REVIEW_RISK = /^(?:low|medium|high|critical)$/u;
+const PROVIDER_RECEIPT = /^<!-- ores-provider-review-receipt v1 verdict=(approve|comment|request_changes) risk=(low|medium|high|critical) confidence_bp=(\d{1,5}) -->$/u;
 const PUBLICATION_MARKER = /<!-- ores-review-publication v1 id=([0-9a-f]{32}) head=([0-9a-f]{40}) -->/gu;
 
 function bounded(value, label, maximum = 512) {
@@ -50,6 +53,44 @@ export function providerReviewExternalId({ job, provider, headSha }) {
   const identity = reviewIdentity({ job, provider, headSha });
   const attemptId = providerReviewAttemptId({ job, provider, headSha });
   return `${identity.provider}:${identity.owner}/${identity.repo}#${identity.prNumber}@${identity.head}:attempt:${attemptId}`;
+}
+
+export function providerReviewReceiptMarker(review) {
+  const verdict = String(review?.verdict ?? '');
+  const risk = String(review?.risk ?? '');
+  const confidence = Number(review?.confidence);
+  if (!REVIEW_VERDICT.test(verdict)) throw new Error('Invalid provider review receipt verdict');
+  if (!REVIEW_RISK.test(risk)) throw new Error('Invalid provider review receipt risk');
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+    throw new Error('Invalid provider review receipt confidence');
+  }
+  const confidenceBp = Math.round(confidence * 10_000);
+  return `<!-- ores-provider-review-receipt v1 verdict=${verdict} risk=${risk} confidence_bp=${confidenceBp} -->`;
+}
+
+export function recoverProviderReviewFromCheck(check) {
+  if (check?.status !== 'completed') return null;
+  const summary = String(check?.output?.summary ?? '');
+  const [firstLine, ...rest] = summary.split('\n');
+  const match = PROVIDER_RECEIPT.exec(firstLine ?? '');
+  if (!match) return null;
+  const confidenceBp = Number(match[3]);
+  if (!Number.isSafeInteger(confidenceBp) || confidenceBp < 0 || confidenceBp > 10_000) return null;
+  const verdict = match[1];
+  const expectedConclusion = verdict === 'approve' ? 'success' : 'failure';
+  if (String(check.conclusion ?? '') !== expectedConclusion) return null;
+  const recoveredSummary = rest.join('\n').trim() || 'Recovered exact provider review receipt.';
+  return Object.freeze({
+    verdict,
+    summary: recoveredSummary,
+    confidence: confidenceBp / 10_000,
+    risk: match[2],
+    findings: Object.freeze([]),
+    tests: Object.freeze([]),
+    blocking_reasons: Object.freeze(verdict === 'request_changes' ? ['recovered exact provider request_changes verdict'] : []),
+    checkRunId: Number(check.id),
+    recovered: true,
+  });
 }
 
 export function attestationPublicationId({ owner, repo, prNumber, headSha, reviews }) {
