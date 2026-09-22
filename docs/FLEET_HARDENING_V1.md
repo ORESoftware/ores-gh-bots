@@ -6,7 +6,7 @@ The deprecated direct-write path is fail-closed. `applyOrganizationHardening(...
 
 ## Trust boundaries
 
-Fleet-hardening writes use the dedicated `FLEET_HARDENING_APP_ID` identity. Its App has only `contents:write`, `pull_requests:write`, and `metadata:read`. It has no checks permission, no repository-administration permission, and no merge authority. Keep it distinct from the review Gate App and Merge Reaper App.
+Fleet-hardening writes use the dedicated `FLEET_HARDENING_APP_ID` identity. Its App has only `contents:write`, `pull_requests:write`, and `metadata:read`. It has no checks or repository-administration permission and therefore cannot manufacture ORES review/gate evidence or change repository policy. GitHub's permission model couples `contents:write` to several repository-content effects, so the credential itself must **not** be described as cryptographically incapable of merging. The enforced boundary is instead: the fleet-hardening runtime contains no merge call/path, the App is never a ruleset bypass actor, and normal branch/ruleset requirements remain authoritative before any proposal can be merged. Keep this App distinct from the review Gate App and Merge Reaper App.
 
 Plans bind:
 
@@ -17,7 +17,7 @@ Plans bind:
 - every selected repository/default branch and its exact head SHA;
 - every proposed file path, canonical content, content SHA-256, and previous blob SHA when present.
 
-Apply revalidates the complete target set before the first write. Any branch-head drift rejects the entire plan. A deterministic `ores/fleet-hardening/<plan-digest-prefix>` branch is then created per affected repository and an ordinary PR is opened. The tool never merges those PRs.
+Apply revalidates the complete target set before the first write. Any branch-head drift rejects the entire plan. A deterministic `ores/fleet-hardening/<plan-digest-prefix>` branch is then created per affected repository and an ordinary PR is opened. The tool never invokes a merge endpoint. Existing deterministic branches are admitted only when their complete changed-path set and planned file contents match the reviewed plan; the final proposal state is checked again after creation/reuse.
 
 ## Repository scope
 
@@ -38,15 +38,19 @@ node apps/cli/src/hardening.mjs hardening plan \
   --output fleet-hardening-plan.json
 ```
 
-`FLEET_HARDENING_APP_ID`, `FLEET_HARDENING_APP_PRIVATE_KEY`, an owner allowlist/pattern, and `HARDENING_SOURCE_REVISION` (or `GITHUB_SHA`) are required. The plan file is mode `0600` because it can contain private repository names and exact heads.
+`FLEET_HARDENING_APP_ID`, `FLEET_HARDENING_APP_PRIVATE_KEY`, an owner allowlist/pattern, and `HARDENING_SOURCE_REVISION` (or `GITHUB_SHA`) are required. The plan file is mode `0600` because it can contain private repository names and exact heads. Local `fleet-hardening-*.json`, `plans/fleet-hardening/`, and `receipts/fleet-hardening/` are git-ignored; keep detailed plans/receipts in those private local paths or another approved private/encrypted operator channel, and review their digests rather than committing their contents to this public repository.
 
 The public-repository Actions workflow is intentionally **plan-only**. It uploads only a content-free receipt containing the organization, environment, operation count, and plan digest, then deletes the detailed plan. Do not upload a private fleet plan as a public Actions artifact.
 
 ## Review and apply
 
-A reviewed plan belongs under `plans/fleet-hardening/` in an approved private/encrypted operator channel or reviewed workspace. Apply requires the exact SHA-256 digest of that reviewed plan:
+A reviewed plan belongs under git-ignored `plans/fleet-hardening/` after it has been obtained through an approved private/encrypted operator channel or reviewed workspace. Apply requires the exact SHA-256 digest of that reviewed plan:
 
 ```bash
+mkdir -p plans/fleet-hardening receipts/fleet-hardening
+chmod 700 plans/fleet-hardening receipts/fleet-hardening
+chmod 600 plans/fleet-hardening/chapter-publishing-test.json
+
 node apps/cli/src/hardening.mjs hardening apply \
   --organization chapter-publishing-test \
   --environment test \
@@ -56,11 +60,11 @@ node apps/cli/src/hardening.mjs hardening apply \
   --output fleet-hardening-apply-ledger.json
 ```
 
-Reruns are idempotent only when the deterministic proposal branch contains the reviewed proposal and its corresponding PR is still open. A colliding/incomplete branch fails closed. Partial failures produce a rollback ledger; they do not continue silently into later repositories.
+Reruns are idempotent only when the deterministic proposal branch contains exactly the reviewed changed-path set/content and its corresponding PR is still open. A colliding/incomplete branch fails closed. Partial failures produce a rollback ledger; they do not continue silently into later repositories.
 
 ## Test-to-production promotion
 
-Production apply additionally requires a reviewed canary receipt under `receipts/fleet-hardening/`. The receipt must identify the configured paired test organization, production organization, tested PR number and exact tested head SHA, passed status, and the current fleet configuration. The receipt digest is supplied separately on apply.
+Production apply additionally requires a reviewed canary receipt under git-ignored `receipts/fleet-hardening/`. The receipt must identify the configured paired test organization, production organization, tested PR number and exact tested head SHA, passed status, and the current fleet configuration. The receipt digest is supplied separately on apply.
 
 A test-org proposal is not authority to write production. Production is a separate explicit invocation after the test proposal has passed its normal repository checks/reviews and the canary evidence has been reviewed.
 
