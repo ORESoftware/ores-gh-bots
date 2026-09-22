@@ -1,4 +1,5 @@
 import { CHECK_NAMES, OWN_CHECK_NAMES } from '../../core/src/constants.mjs';
+import { providerReviewReceiptMarker } from '../../core/src/review-attempt.mjs';
 
 function annotationLevel(severity) {
   if (['critical', 'high'].includes(severity)) return 'failure';
@@ -44,6 +45,61 @@ export async function findLatestCheckRun(client, token, owner, repo, headSha, na
     .sort((a, b) => b.id - a.id)[0] ?? null;
 }
 
+export async function findExactAppCheckRun(client, token, owner, repo, headSha, name, { externalId, expectedAppId }) {
+  const appId = Number(expectedAppId);
+  if (!externalId || !Number.isSafeInteger(appId) || appId < 1) {
+    throw new Error('Exact App-bound Check Run lookup requires externalId and expectedAppId');
+  }
+  const response = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/check-runs?check_name=${encodeURIComponent(name)}&filter=all&per_page=100`, { token });
+  const exact = (response.data.check_runs ?? []).filter((check) => (
+    check.name === name
+    && check.external_id === externalId
+    && String(check.head_sha ?? '').toLowerCase() === String(headSha).toLowerCase()
+    && Number(check?.app?.id) === appId
+  ));
+  if (exact.length > 1) {
+    throw new Error(`Duplicate trusted Check Runs for ${name} and logical review attempt`);
+  }
+  return exact[0] ?? null;
+}
+
+export async function ensureReviewAttemptCheck({
+  client,
+  token,
+  owner,
+  repo,
+  headSha,
+  name,
+  detailsUrl,
+  externalId,
+  expectedAppId,
+  summary,
+}) {
+  const existing = await findExactAppCheckRun(
+    client,
+    token,
+    owner,
+    repo,
+    headSha,
+    name,
+    { externalId, expectedAppId },
+  );
+  if (existing) return { ...existing, reusedCompleted: existing.status === 'completed' };
+  const created = await createCheckRun(client, token, owner, repo, {
+    name,
+    head_sha: headSha,
+    status: 'in_progress',
+    started_at: new Date().toISOString(),
+    details_url: detailsUrl || undefined,
+    external_id: externalId,
+    output: {
+      title: name,
+      summary: summary.slice(0, 65_535),
+    },
+  });
+  return { ...created, reusedCompleted: false };
+}
+
 export async function ensureInProgressCheck({ client, token, owner, repo, headSha, name, detailsUrl, externalId, summary }) {
   const existing = await findLatestCheckRun(client, token, owner, repo, headSha, name, { externalId });
   const payload = {
@@ -84,6 +140,7 @@ export async function completeReviewCheck({ client, token, owner, repo, checkRun
     findings.length ? `\n## Findings\n${findings.join('\n')}` : '\nNo findings were reported.',
     review.tests.length ? `\n## Suggested validation\n${review.tests.map((item) => `- ${item}`).join('\n')}` : '',
   ].join('\n').slice(0, 65_535);
+  const receipt = providerReviewReceiptMarker(review);
 
   return updateCheckRun(client, token, owner, repo, checkRunId, {
     name,
@@ -93,7 +150,7 @@ export async function completeReviewCheck({ client, token, owner, repo, checkRun
     details_url: detailsUrl || undefined,
     output: {
       title: `${name}: ${review.verdict}`.slice(0, 255),
-      summary: review.summary.slice(0, 65_535),
+      summary: `${receipt}\n${review.summary}`.slice(0, 65_535),
       text,
       annotations: reviewAnnotations(review),
     },
