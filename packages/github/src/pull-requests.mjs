@@ -10,7 +10,7 @@ export async function listPullRequestFiles(client, token, owner, repo, prNumber)
   });
 }
 
-export async function listPullRequestReviews(client, token, owner, repo, prNumber) {
+export async function listPullRequestReviewSubmissions(client, token, owner, repo, prNumber) {
   return client.paginate(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${prNumber}/reviews?per_page=100`, {
     token,
     map: (data) => data,
