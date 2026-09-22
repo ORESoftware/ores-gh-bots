@@ -28,12 +28,16 @@ on:
         required: false
         default: github-actions-dispatch
         type: string
+      attempt_id:
+        description: Durable logical review-attempt identity from the dispatcher
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ores-review-${{ inputs.owner }}-${{ inputs.repo }}-${{ inputs.pr_number }}-${{ inputs.head_sha }}
+  group: ores-review-${{ inputs.owner }}-${{ inputs.repo }}-${{ inputs.pr_number }}-${{ inputs.head_sha }}-${{ inputs.attempt_id }}
   cancel-in-progress: false
 
 jobs:
@@ -64,6 +68,7 @@ jobs:
           REVIEW_HEAD_SHA: ${{ inputs.head_sha }}
           REVIEW_INSTALLATION_ID: ${{ inputs.installation_id }}
           REVIEW_REASON: ${{ inputs.reason }}
+          REVIEW_ATTEMPT_ID: ${{ inputs.attempt_id }}
           OWNER_ALLOWLIST: ${{ inputs.owner }}
           GITHUB_APP_ID: ${{ secrets.ORCHESTRATOR_APP_ID }}
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}
