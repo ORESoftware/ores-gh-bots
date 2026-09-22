@@ -187,6 +187,9 @@ export async function upsertRepositoryTextFile(client, token, {
   branch,
   dryRun = true,
 }) {
+  if (!dryRun && !String(branch ?? '').trim()) {
+    throw new Error('Direct default-branch file writes are forbidden; create an explicit proposal branch');
+  }
   const normalized = canonicalText(content);
   const existing = await getRepositoryTextFile(client, token, { owner, repo, path, ref: branch });
   if (existing && canonicalText(existing.content) === normalized) {
@@ -197,8 +200,8 @@ export async function upsertRepositoryTextFile(client, token, {
   const body = {
     message,
     content: base64EncodeUtf8(normalized),
+    branch,
   };
-  if (branch) body.branch = branch;
   if (existing?.sha) body.sha = existing.sha;
   const response = await client.request('PUT', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodeRepositoryPath(path)}`, { token, body });
   return {
@@ -226,6 +229,9 @@ export async function applyOrganizationHardening(client, token, fleet, organizat
   continueOnError = false,
 } = {}) {
   validateHardeningFleet(fleet);
+  if (!dryRun) {
+    throw new Error('Legacy direct fleet-hardening apply is disabled; use a reviewed PR-only fleet hardening plan');
+  }
   const results = [];
   const policyRepository = organization.policy_repository ?? fleet.defaults.policy_repository ?? '.github';
   const policyPath = organization.policy_path ?? fleet.defaults.policy_path ?? 'policy/ores-fleet-hardening.v1.json';

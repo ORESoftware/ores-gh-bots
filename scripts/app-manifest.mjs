@@ -91,7 +91,7 @@ export async function createForm(options, {
 </head>
 <body>
   <h1>Register ${escapeHtml(prepared.name)}</h1>
-  <p>Review the permissions on GitHub before creating the App.</p>
+  <p>Review the permissions GitHub displays before creating the App.</p>
   <form action="${escapeHtml(action)}" method="post">
     <input type="hidden" name="manifest" value="${escapeHtml(manifestJson)}">
     <button type="submit">Create GitHub App</button>
@@ -137,6 +137,10 @@ const credentialMap = {
   reaper: {
     id: 'MERGE_REAPER_APP_ID',
     pem: 'MERGE_REAPER_APP_PRIVATE_KEY',
+  },
+  hardening: {
+    id: 'FLEET_HARDENING_APP_ID',
+    pem: 'FLEET_HARDENING_APP_PRIVATE_KEY',
   },
 };
 

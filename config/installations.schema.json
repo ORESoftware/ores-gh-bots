@@ -39,100 +39,52 @@
         "claude",
         "gate",
         "actions",
-        "reaper"
+        "reaper",
+        "hardening"
       ],
       "properties": {
-        "orchestrator": {
-          "$ref": "#/$defs/app"
-        },
-        "openai": {
-          "$ref": "#/$defs/app"
-        },
-        "claude": {
-          "$ref": "#/$defs/app"
-        },
-        "gate": {
-          "$ref": "#/$defs/app"
-        },
-        "actions": {
-          "$ref": "#/$defs/app"
-        },
-        "reaper": {
-          "$ref": "#/$defs/app"
-        }
+        "orchestrator": { "$ref": "#/$defs/app" },
+        "openai": { "$ref": "#/$defs/app" },
+        "claude": { "$ref": "#/$defs/app" },
+        "gate": { "$ref": "#/$defs/app" },
+        "actions": { "$ref": "#/$defs/app" },
+        "reaper": { "$ref": "#/$defs/app" },
+        "hardening": { "$ref": "#/$defs/app" }
       }
     }
   },
   "$defs": {
     "nullablePositiveInteger": {
-      "type": [
-        "integer",
-        "null"
-      ],
+      "type": ["integer", "null"],
       "minimum": 1
     },
     "app": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "appId",
-        "slug",
-        "visibility",
-        "installations"
-      ],
+      "required": ["appId", "slug", "visibility", "installations"],
       "properties": {
-        "appId": {
-          "$ref": "#/$defs/nullablePositiveInteger"
-        },
-        "slug": {
-          "type": "string",
-          "minLength": 1
-        },
-        "visibility": {
-          "enum": [
-            "public-unlisted",
-            "private"
-          ]
-        },
+        "appId": { "$ref": "#/$defs/nullablePositiveInteger" },
+        "slug": { "type": "string", "minLength": 1 },
+        "visibility": { "enum": ["public-unlisted", "private"] },
         "installations": {
           "type": "array",
           "minItems": 1,
-          "items": {
-            "$ref": "#/$defs/installation"
-          }
+          "items": { "$ref": "#/$defs/installation" }
         }
       }
     },
     "installation": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "account",
-        "installationId",
-        "repositorySelection",
-        "repositories"
-      ],
+      "required": ["account", "installationId", "repositorySelection", "repositories"],
       "properties": {
-        "account": {
-          "type": "string",
-          "minLength": 1
-        },
-        "installationId": {
-          "$ref": "#/$defs/nullablePositiveInteger"
-        },
-        "repositorySelection": {
-          "enum": [
-            "all",
-            "selected"
-          ]
-        },
+        "account": { "type": "string", "minLength": 1 },
+        "installationId": { "$ref": "#/$defs/nullablePositiveInteger" },
+        "repositorySelection": { "enum": ["all", "selected"] },
         "repositories": {
           "type": "array",
           "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^[^/]+/[^/]+$"
-          }
+          "items": { "type": "string", "pattern": "^[^/]+/[^/]+$" }
         }
       }
     }
