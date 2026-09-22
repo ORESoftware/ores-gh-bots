@@ -7,6 +7,7 @@ import {
 
 const first = 'a'.repeat(40);
 const second = 'b'.repeat(40);
+const attempts = { openai: '1'.repeat(32), claude: '2'.repeat(32) };
 
 function check(role, headSha, overrides = {}) {
   const names = {
@@ -15,10 +16,11 @@ function check(role, headSha, overrides = {}) {
     gate: 'ores-review/gate',
   };
   const ids = { openai: 101, claude: 102, gate: 103 };
+  const baseExternalId = `${role}:example-test/review-canary#7@${headSha}`;
   return {
     name: names[role],
     app_id: ids[role],
-    external_id: `${role}:example-test/review-canary#7@${headSha}`,
+    external_id: role === 'gate' ? baseExternalId : `${baseExternalId}:attempt:${attempts[role]}`,
     head_sha: headSha,
     status: 'completed',
     conclusion: 'success',
@@ -110,11 +112,21 @@ test('rejects a pending snapshot that already has a successful gate', () => {
 test('rejects shared App identities and stale external IDs', () => {
   const value = evidence();
   value.app_ids.claude = value.app_ids.openai;
-  value.snapshots.second_head_complete.checks[0].external_id = `openai:example-test/review-canary#7@${first}`;
+  value.snapshots.second_head_complete.checks[0].external_id = `openai:example-test/review-canary#7@${first}:attempt:${attempts.openai}`;
   const result = verifyCanaryEvidence(value);
   assert.equal(result.ok, false);
   assert.match(result.errors.join('\n'), /three distinct GitHub App identities/u);
   assert.match(result.errors.join('\n'), /must bind openai/u);
+});
+
+test('rejects provider evidence that omits or malforms the logical attempt id', () => {
+  const missing = evidence();
+  missing.snapshots.second_head_complete.checks[0].external_id = `openai:example-test/review-canary#7@${second}`;
+  assert.match(verifyCanaryEvidence(missing).errors.join('\n'), /logical review attempt/u);
+
+  const malformed = evidence();
+  malformed.snapshots.second_head_complete.checks[1].external_id = `claude:example-test/review-canary#7@${second}:attempt:not-a-digest`;
+  assert.match(verifyCanaryEvidence(malformed).errors.join('\n'), /logical review attempt/u);
 });
 
 test('rejects an expected digest that is not bound to the evidence', () => {
