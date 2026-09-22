@@ -9,6 +9,7 @@ export * from './admission.mjs';
 export * from './gate.mjs';
 export * from './events.mjs';
 export * from './agent-tags.mjs';
+export * from './review-attempt.mjs';
 export * from './peer-consult.mjs';
 export * from './log.mjs';
 export * from './metrics.mjs';
