@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from 'node:crypto';
 import { AppAuth, GitHubClient } from '../../../packages/github/src/index.mjs';
 import { createLogger, loadConfig, Metrics, redactObject, resolveCli, validateRuntimeConfig } from '../../../packages/core/src/index.mjs';
 import { SqliteQueue } from '../../../packages/queue/src/index.mjs';
@@ -15,9 +16,13 @@ const owner = values.REVIEW_OWNER;
 const repo = values.REVIEW_REPO;
 const prNumber = Number(values.REVIEW_PR_NUMBER);
 const headSha = values.REVIEW_HEAD_SHA ?? null;
+const attemptId = String(cli.env.REVIEW_ATTEMPT_ID ?? '').trim() || `manual:${randomUUID()}`;
 let installationId = Number(values.REVIEW_INSTALLATION_ID ?? 0);
 if (!owner || !repo || !Number.isInteger(prNumber) || prNumber < 1) {
   throw new Error('Usage: npm run review -- --owner OWNER --repo REPO --pr-number NUMBER [--head-sha SHA] [--installation-id ID]');
+}
+if (attemptId.length > 256 || /[\u0000-\u001f\u007f]/u.test(attemptId)) {
+  throw new Error('REVIEW_ATTEMPT_ID is oversized or malformed');
 }
 
 const config = loadConfig({ ...cli.env, QUEUE_PATH: ':memory:', GHA_MODE: 'disabled' });
@@ -33,6 +38,7 @@ const engine = new ReviewEngine({ config, client, auth, queue, logger, metrics }
 try {
   const result = await engine.process({
     id: 0,
+    attemptId,
     type: values.REVIEW_TYPE === 'gate' ? 'gate' : 'review',
     installationId,
     owner,
