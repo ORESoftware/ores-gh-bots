@@ -10,13 +10,6 @@ export async function listPullRequestFiles(client, token, owner, repo, prNumber)
   });
 }
 
-export async function listPullRequestReviewSubmissions(client, token, owner, repo, prNumber) {
-  return client.paginate(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${prNumber}/reviews?per_page=100`, {
-    token,
-    map: (data) => data,
-  });
-}
-
 export async function listOpenPullRequests(client, token, owner, repo, perPage = 100) {
   const pulls = await client.paginate(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls?state=open&sort=updated&direction=desc&per_page=${Math.min(perPage, 100)}`, {
     token,
