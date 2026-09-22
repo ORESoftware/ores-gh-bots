@@ -28,6 +28,7 @@ const IMPLEMENTATION_FILES = [
   'apps/cli/src/hardening.mjs',
   'config/hardening-fleet.schema.json',
   'packages/github/src/fleet-hardening-plan.mjs',
+  'packages/github/src/fleet-hardening-plan-admission.mjs',
   'packages/github/src/hardening.mjs',
 ];
 const SHA = /^[0-9a-f]{40}$/u;
