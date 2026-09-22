@@ -159,6 +159,7 @@ function fakeClient({ failReviews = false } = {}) {
     calls,
     async paginate(path) {
       if (path.includes('/files')) return [{ filename: 'a.js', status: 'modified', additions: 1, deletions: 0, changes: 1, patch: '@@ -1 +1 @@\n-old\n+new' }];
+      if (path.includes('/pulls/1/reviews')) return [];
       throw new Error(`Unexpected paginate: ${path}`);
     },
     async request(method, path, options = {}) {
@@ -187,6 +188,7 @@ function engineWith({ env, fetchImpl, failReviews = false }) {
   const client = fakeClient({ failReviews });
   const config = loadConfig({
     OWNER_ALLOWLIST: 'O', GITHUB_APP_ID: '1', GITHUB_APP_PRIVATE_KEY: 'unused-in-mock',
+    OPENAI_REVIEW_APP_ID: '2', CLAUDE_REVIEW_APP_ID: '3', GATE_APP_ID: '4',
     OPENAI_API_KEY: 'test-openai-key-that-is-not-a-real-secret', OPENAI_BASE_URL: 'https://openai.test',
     ANTHROPIC_API_KEY: 'test-anthropic-key-that-is-not-a-real-secret', ANTHROPIC_BASE_URL: 'https://anthropic.test',
     GHA_MODE: 'disabled', ...env,
