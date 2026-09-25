@@ -39,7 +39,8 @@
         "claude",
         "gate",
         "actions",
-        "reaper"
+        "reaper",
+        "hardening"
       ],
       "properties": {
         "orchestrator": {
@@ -58,6 +59,9 @@
           "$ref": "#/$defs/app"
         },
         "reaper": {
+          "$ref": "#/$defs/app"
+        },
+        "hardening": {
           "$ref": "#/$defs/app"
         }
       }

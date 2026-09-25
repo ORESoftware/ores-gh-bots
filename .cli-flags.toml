@@ -312,3 +312,82 @@ help = "Inspect the installed fleet and render an exact-head merge plan without 
 
 [commands.reaper.commands.apply]
 help = "Merge at most three exact-head eligible pull requests in dependency order."
+
+[commands.hardening]
+help = "Plan or propose fleet hardening through reviewed pull requests only."
+
+[commands.hardening.flags.config]
+env = "HARDENING_CONFIG"
+aliases = ["config"]
+type = "string"
+default = "config/hardening-fleet.v1.json"
+help = "Reviewed operational fleet policy file."
+
+[commands.hardening.flags.organization]
+env = "HARDENING_ORGANIZATION"
+aliases = ["organization"]
+type = "string"
+help = "Exactly one explicit organization; blank fails closed."
+
+[commands.hardening.flags.environment]
+env = "HARDENING_EXPECTED_ENVIRONMENT"
+aliases = ["environment"]
+type = "string"
+help = "Expected organization environment: test or production."
+
+[commands.hardening.flags.include_repositories]
+env = "HARDENING_INCLUDE_REPOSITORIES"
+aliases = ["include-repositories"]
+type = "bool"
+default = false
+help = "Include in-scope repository policy proposals in addition to the organization policy repository."
+
+[commands.hardening.flags.max_repositories]
+env = "HARDENING_MAX_REPOSITORIES"
+aliases = ["max-repositories"]
+type = "integer"
+default = 500
+help = "Maximum organization repositories inspected while planning; hard-capped at 1000."
+
+[commands.hardening.flags.output]
+env = "HARDENING_OUTPUT"
+aliases = ["output"]
+type = "string"
+default = "fleet-hardening-plan.json"
+help = "Plan or apply-ledger output path."
+
+[commands.hardening.commands.plan]
+help = "Create a deterministic no-write exact-head plan for one organization."
+
+[commands.hardening.commands.apply]
+help = "Apply one reviewed plan by opening deterministic additive PRs; never merge or write a default branch."
+
+[commands.hardening.commands.apply.flags.plan]
+env = "HARDENING_PLAN_PATH"
+aliases = ["plan"]
+type = "string"
+help = "Reviewed plan path under plans/fleet-hardening/."
+
+[commands.hardening.commands.apply.flags.plan_digest]
+env = "HARDENING_PLAN_DIGEST"
+aliases = ["plan-digest"]
+type = "string"
+help = "Exact reviewed sha256 plan digest."
+
+[commands.hardening.commands.apply.flags.confirm]
+env = "HARDENING_CONFIRMATION"
+aliases = ["confirm"]
+type = "string"
+help = "Required exact HARDEN-<change-ticket> acknowledgement."
+
+[commands.hardening.commands.apply.flags.canary_receipt]
+env = "HARDENING_CANARY_RECEIPT_PATH"
+aliases = ["canary-receipt"]
+type = "string"
+help = "For production only: reviewed receipt path under receipts/fleet-hardening/."
+
+[commands.hardening.commands.apply.flags.canary_digest]
+env = "HARDENING_CANARY_DIGEST"
+aliases = ["canary-digest"]
+type = "string"
+help = "For production only: exact reviewed sha256 canary receipt digest."

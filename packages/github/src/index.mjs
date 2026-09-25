@@ -6,6 +6,7 @@ export * from './fleet.mjs';
 export * from './rulesets.mjs';
 export * from './actions.mjs';
 export * from './hardening.mjs';
+export * from './fleet-hardening-plan-admission.mjs';
 export * from './contract-artifacts.mjs';
 export * from './pr-dependencies.mjs';
 
