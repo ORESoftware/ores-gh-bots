@@ -273,6 +273,7 @@ test('runtime config requires independent reviewer and gate App identities by de
     GITHUB_APP_ID: '1',
     GITHUB_APP_PRIVATE_KEY: 'orchestrator-key',
     GITHUB_WEBHOOK_SECRET: 'webhook-secret',
+    OWNER_ALLOWLIST: 'ORESoftware',
     OPENAI_API_KEY: 'openai-key',
     ANTHROPIC_API_KEY: 'anthropic-key',
   };
