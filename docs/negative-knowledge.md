@@ -29,7 +29,7 @@ env:
   REVIEW_OWNER: ${{ inputs.owner }}
   ...
   REVIEW_REASON: ${{ inputs.reason }}
-run: node apps/runner/src/main.mjs
+run: node apps/runner/src/main.mjs review
 ```
 
 Values delivered through `env:` are never parsed by the shell. This also matches
