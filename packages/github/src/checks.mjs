@@ -155,11 +155,6 @@ export async function completeReviewCheck({ client, token, owner, repo, checkRun
       text,
       annotations: reviewAnnotations(review),
     },
-    actions: [{
-      label: 'Re-review',
-      description: 'Run both ORES AI reviewers again for this SHA.',
-      identifier: 'rereview',
-    }],
   });
 }
 
