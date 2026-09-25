@@ -1,4 +1,5 @@
 export * from './constants.mjs';
+export * from './model-identity.mjs';
 export * from './config.mjs';
 export * from './crypto.mjs';
 export * from './redact.mjs';
