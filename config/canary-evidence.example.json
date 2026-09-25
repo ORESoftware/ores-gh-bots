@@ -27,7 +27,7 @@
         {
           "name": "ores-review/openai",
           "app_id": 101,
-          "external_id": "openai:example-test/review-canary#7@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "external_id": "openai:example-test/review-canary#7@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:attempt:11111111111111111111111111111111",
           "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "status": "completed",
           "conclusion": "success"
@@ -35,7 +35,7 @@
         {
           "name": "ores-review/claude",
           "app_id": 102,
-          "external_id": "claude:example-test/review-canary#7@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "external_id": "claude:example-test/review-canary#7@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:attempt:22222222222222222222222222222222",
           "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "status": "completed",
           "conclusion": "success"
@@ -57,7 +57,7 @@
         {
           "name": "ores-review/openai",
           "app_id": 101,
-          "external_id": "openai:example-test/review-canary#7@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "external_id": "openai:example-test/review-canary#7@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:attempt:11111111111111111111111111111111",
           "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           "status": "in_progress",
           "conclusion": null
@@ -79,7 +79,7 @@
         {
           "name": "ores-review/openai",
           "app_id": 101,
-          "external_id": "openai:example-test/review-canary#7@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "external_id": "openai:example-test/review-canary#7@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:attempt:11111111111111111111111111111111",
           "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           "status": "completed",
           "conclusion": "success"
@@ -87,7 +87,7 @@
         {
           "name": "ores-review/claude",
           "app_id": 102,
-          "external_id": "claude:example-test/review-canary#7@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "external_id": "claude:example-test/review-canary#7@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:attempt:22222222222222222222222222222222",
           "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           "status": "completed",
           "conclusion": "success"
@@ -125,5 +125,5 @@
       }
     ]
   },
-  "evidence_sha256": "7c382189dfa2e95a50f12257900b6723859fdd56899097f79e56b6aa494e0260"
+  "evidence_sha256": "a7dd8762dbf2d0e457ea01291e5f5d32d4c43c4b220abe30a09e3fe960f27a80"
 }

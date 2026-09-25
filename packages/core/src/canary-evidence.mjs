@@ -6,6 +6,7 @@ export const CANARY_EVIDENCE_SCHEMA_VERSION = 'ores.review-canary.v1';
 const ROLES = Object.freeze(['openai', 'claude', 'gate']);
 const SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/iu;
+const REVIEW_ATTEMPT_PATTERN = /^[0-9a-f]{32}$/u;
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const DELIVERY_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u;
 const CHECK_NAME_TO_ROLE = new Map(ROLES.map((role) => [CHECK_NAMES[role], role]));
@@ -69,8 +70,12 @@ function timestamp(value, errors, path) {
   return { text, milliseconds: parsed };
 }
 
-function expectedExternalId(role, repository, pullRequest, headSha) {
-  return `${role}:${repository}#${pullRequest}@${headSha}`;
+function externalIdMatches(role, externalId, repository, pullRequest, headSha) {
+  const prefix = `${role}:${repository}#${pullRequest}@${headSha}`;
+  if (role === 'gate') return externalId === prefix;
+  const attemptPrefix = `${prefix}:attempt:`;
+  return externalId.startsWith(attemptPrefix)
+    && REVIEW_ATTEMPT_PATTERN.test(externalId.slice(attemptPrefix.length));
 }
 
 function normalizeCheck(check, index, context, errors) {
@@ -105,8 +110,8 @@ function normalizeCheck(check, index, context, errors) {
   if (headSha && headSha !== context.expectedHeadSha) {
     push(errors, `${path}.head_sha`, `must equal snapshot head ${context.expectedHeadSha}`);
   }
-  if (role && externalId && externalId !== expectedExternalId(role, context.repository, context.pullRequest, context.expectedHeadSha)) {
-    push(errors, `${path}.external_id`, `must bind ${role} to the repository, PR, and exact snapshot SHA`);
+  if (role && externalId && !externalIdMatches(role, externalId, context.repository, context.pullRequest, context.expectedHeadSha)) {
+    push(errors, `${path}.external_id`, `must bind ${role} to the repository, PR, exact snapshot SHA${role === 'gate' ? '' : ', and logical review attempt'}`);
   }
 
   return {

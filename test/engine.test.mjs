@@ -4,11 +4,12 @@ import { ReviewEngine } from '../packages/engine/src/index.mjs';
 import { SqliteQueue } from '../packages/queue/src/index.mjs';
 import { loadConfig, Metrics } from '../packages/core/src/index.mjs';
 
+const HEAD = 'a'.repeat(40);
 const approved = {
   verdict: 'approve', summary: 'Looks correct.', confidence: 0.93, risk: 'low', findings: [], tests: [], blocking_reasons: [],
 };
 
-function pullRequest(sha = 'abc') {
+function pullRequest(sha = HEAD) {
   return {
     number: 1,
     state: 'open',
@@ -24,7 +25,7 @@ function pullRequest(sha = 'abc') {
   };
 }
 
-function fakeClient({ currentSha = 'abc' } = {}) {
+function fakeClient({ currentSha = HEAD } = {}) {
   let checkId = 100;
   const calls = [];
   return {
@@ -67,6 +68,9 @@ function config() {
     OWNER_ALLOWLIST: 'O',
     GITHUB_APP_ID: '1',
     GITHUB_APP_PRIVATE_KEY: 'unused-in-mock',
+    OPENAI_REVIEW_APP_ID: '2',
+    CLAUDE_REVIEW_APP_ID: '3',
+    GATE_APP_ID: '4',
     OPENAI_API_KEY: 'test-openai-key-that-is-not-a-real-secret',
     OPENAI_BASE_URL: 'https://openai.test',
     ANTHROPIC_API_KEY: 'test-anthropic-key-that-is-not-a-real-secret',
@@ -90,13 +94,13 @@ test('engine publishes two approvals and a successful exact-SHA gate', async () 
   const engine = new ReviewEngine({ config: config(), client, auth, queue, logger: silentLogger, metrics: new Metrics(), fetchImpl: providerFetch });
   try {
     const result = await engine.process({
-      id: 1, type: 'review', installationId: 1, owner: 'O', repo: 'R', prNumber: 1, headSha: 'abc', reason: 'test',
+      id: 1, type: 'review', installationId: 1, owner: 'O', repo: 'R', prNumber: 1, headSha: HEAD, reason: 'test',
       attempts: 1, maxAttempts: 1,
     });
     assert.equal(result.openai.verdict, 'approve');
     assert.equal(result.claude.verdict, 'approve');
     assert.equal(result.gate.conclusion, 'success');
-    assert.equal(result.gate.headSha, 'abc');
+    assert.equal(result.gate.headSha, HEAD);
     const creates = client.calls.filter((call) => call.method === 'POST' && call.path.endsWith('/check-runs'));
     assert.equal(creates.length, 3);
     assert.deepEqual(creates.map((call) => call.options.body.name).sort(), ['ores-review/claude', 'ores-review/gate', 'ores-review/openai']);
@@ -105,16 +109,16 @@ test('engine publishes two approvals and a successful exact-SHA gate', async () 
 
 test('engine refuses to review a stale queued SHA and enqueues the current SHA', async () => {
   const queue = new SqliteQueue({ path: ':memory:' });
-  const client = fakeClient({ currentSha: 'new-sha' });
+  const client = fakeClient({ currentSha: 'b'.repeat(40) });
   const engine = new ReviewEngine({ config: config(), client, auth, queue, logger: silentLogger, metrics: new Metrics(), fetchImpl: providerFetch });
   try {
     const result = await engine.process({
-      id: 1, type: 'review', installationId: 1, owner: 'O', repo: 'R', prNumber: 1, headSha: 'old-sha', reason: 'test',
+      id: 1, type: 'review', installationId: 1, owner: 'O', repo: 'R', prNumber: 1, headSha: 'c'.repeat(40), reason: 'test',
       attempts: 1, maxAttempts: 1,
     });
     assert.equal(result.skipped, 'stale-head');
     const replacement = queue.claimNext('worker', 30_000);
-    assert.equal(replacement.headSha, 'new-sha');
+    assert.equal(replacement.headSha, 'b'.repeat(40));
     assert.equal(client.calls.some((call) => call.method === 'POST' && call.path.endsWith('/check-runs')), false);
   } finally { queue.close(); }
 });

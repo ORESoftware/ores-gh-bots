@@ -1,14 +1,19 @@
 import {
   CHECK_NAMES,
   applyConsultResult,
+  attestationPublicationId,
   buildReviewAttestations,
   createLogger,
   evaluateGate,
   parsePullRequestDependencies,
+  parseReviewPublicationMarkers,
   peerConsultPlan,
   peerReviewForPrompt,
+  providerReviewExternalId,
   pullRequestDependencyKey,
+  recoverProviderReviewFromCheck,
   redactText,
+  reviewPublicationMarker,
 } from '../../core/src/index.mjs';
 import {
   completeFailedCheck,
@@ -18,11 +23,13 @@ import {
   createPullRequestReview,
   dispatchWorkflow,
   ensureInProgressCheck,
+  ensureReviewAttemptCheck,
   evaluatePullRequestDependencies,
   getCiSnapshot,
   getCollaboratorPermission,
   getPullRequest,
   listPullRequestFiles,
+  listPullRequestReviews,
   permissionCanTriggerReview,
 } from '../../github/src/index.mjs';
 import { replacePullRequestDependencies } from '../../queue/src/index.mjs';
@@ -41,11 +48,16 @@ function detailsUrl(config, owner, repo, prNumber, headSha) {
   return `${base}/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${prNumber}/${headSha}`;
 }
 
-function summaryBody(reviews, gate, { attest = false } = {}) {
+function summaryBody(reviews, gate, { attest = false, publicationMarker = null } = {}) {
   // Attestations lead the body so the my-ai agent-review-gate can read them
-  // from a review anchored to the exact head commit.
+  // from a review anchored to the exact head commit. The publication marker
+  // makes this summary itself idempotently discoverable after a process crash.
   const attestations = attest ? buildReviewAttestations({ headSha: gate.headSha, reviews }) : [];
-  const lines = [...attestations, 'ORES dual-AI review result:'];
+  const lines = [
+    ...(publicationMarker ? [publicationMarker] : []),
+    ...attestations,
+    'ORES dual-AI review result:',
+  ];
   for (const provider of ['openai', 'claude']) {
     const review = reviews[provider];
     if (!review) lines.push(`- ${provider}: pending`);
@@ -145,20 +157,21 @@ export class ReviewEngine {
         head_sha: pullRequest.head.sha,
         installation_id: job.installationId,
         reason: job.reason,
+        attempt_id: job.attemptId ?? job.dedupeKey ?? `job:${job.id}`,
       },
     );
     this.metrics?.increment('ores_review_offload_dispatched_total');
     return { offloaded: true, headSha: pullRequest.head.sha };
   }
 
-  // One required check per provider and head: the check opens before the
-  // independent call and completes once, after any peer consult, so no
-  // provisional success is ever published for the required context.
+  // One required check per provider and logical attempt: retries rediscover the
+  // exact App-owned Check Run. Forced re-reviews have a different durable queue
+  // identity and therefore a different external_id even on the same head.
   async #openProviderCheck({ provider, job, pullRequest }) {
     const role = provider === 'openai' ? 'openai' : 'claude';
     const access = await this.auth.repoToken(role, job.owner, job.repo, job.installationId);
     const url = detailsUrl(this.config, job.owner, job.repo, job.prNumber, pullRequest.head.sha);
-    const check = await ensureInProgressCheck({
+    const check = await ensureReviewAttemptCheck({
       client: this.client,
       token: access.token,
       owner: job.owner,
@@ -166,10 +179,15 @@ export class ReviewEngine {
       headSha: pullRequest.head.sha,
       name: CHECK_NAMES[provider],
       detailsUrl: url,
-      externalId: `${provider}:${job.owner}/${job.repo}#${job.prNumber}@${pullRequest.head.sha}`,
+      externalId: providerReviewExternalId({ job, provider, headSha: pullRequest.head.sha }),
+      expectedAppId: this.config.apps[role].id,
       summary: `${provider} is reviewing the exact pull-request head SHA ${pullRequest.head.sha}.`,
     });
-    return { provider, token: access.token, url, checkRunId: check.id };
+    const recovered = check.reusedCompleted ? recoverProviderReviewFromCheck(check) : null;
+    if (check.reusedCompleted && !recovered) {
+      throw new Error(`Completed ${provider} Check Run for this logical attempt has no valid recoverable receipt`);
+    }
+    return { provider, token: access.token, url, checkRunId: check.id, recovered };
   }
 
   async #callProvider({ provider, context }) {
@@ -182,10 +200,12 @@ export class ReviewEngine {
     }
   }
 
-  // Each provider that approved is invoked again with its peer's review. The
-  // consult result, including a consult failure, replaces the approval.
-  async #consultPeers({ context, reviews }) {
-    const plan = peerConsultPlan({ mode: this.config.review.peerConsult, reviews });
+  // Each provider that approved is invoked again with its peer's review. A
+  // recovered provider already has a terminal exact-attempt Check Run, so it is
+  // never called or consulted again during crash recovery.
+  async #consultPeers({ context, reviews, skipProviders = new Set() }) {
+    const plan = peerConsultPlan({ mode: this.config.review.peerConsult, reviews })
+      .filter(({ provider }) => !skipProviders.has(provider));
     const consulted = await Promise.all(plan.map(async ({ provider, peer }) => {
       this.metrics?.increment('ores_peer_consults_total', { provider, peer });
       const result = await this.#callProvider({
@@ -211,6 +231,21 @@ export class ReviewEngine {
     return summary;
   }
 
+  #recordRecoveredProvider({ provider, job, pullRequest, recovered }) {
+    const { checkRunId, recovered: _recovered, ...stored } = recovered;
+    this.queue.recordReview({
+      owner: job.owner,
+      repo: job.repo,
+      prNumber: job.prNumber,
+      headSha: pullRequest.head.sha,
+      provider,
+      result: stored,
+      checkRunId,
+    });
+    this.metrics?.increment('ores_provider_review_reuses_total', { provider, verdict: recovered.verdict });
+    return recovered;
+  }
+
   async #finishProvider({ opened, job, pullRequest, result }) {
     const { provider, token, url, checkRunId } = opened;
     const target = { client: this.client, token, owner: job.owner, repo: job.repo, checkRunId, name: CHECK_NAMES[provider], detailsUrl: url };
@@ -227,9 +262,9 @@ export class ReviewEngine {
     }
 
     // Success becomes durable/countable only after the exact provider Check Run
-    // has reached its terminal success state. If publication fails, overwrite
-    // any older same-provider/same-head success with an error before the
-    // aggregate gate can read the queue.
+    // has reached its terminal state. Its output includes a small receipt that
+    // lets a lease/process retry reconstruct the verdict without minting a new
+    // Check Run or re-calling the provider.
     try {
       await completeReviewCheck({ ...target, review: stored });
     } catch (error) {
@@ -351,19 +386,25 @@ export class ReviewEngine {
       invalidateProvider(provider),
     )));
     const independent = await Promise.all(opened.map((check) => (
-      check.error ? check : this.#callProvider({ provider: check.provider, context })
+      check.error ? check : (check.recovered ?? this.#callProvider({ provider: check.provider, context }))
     )));
+    const recoveredProviders = new Set(opened.filter((check) => check.recovered).map((check) => check.provider));
     const final = await this.#consultPeers({
       context,
       reviews: { openai: independent[0], claude: independent[1] },
+      skipProviders: recoveredProviders,
     });
-    const [openai, claude] = await Promise.all(opened.map((check, index) => (
-      check.error ? check : this.#settleProvider(
+    const [openai, claude] = await Promise.all(opened.map((check, index) => {
+      if (check.error) return check;
+      if (check.recovered) {
+        return this.#recordRecoveredProvider({ provider: providers[index], job, pullRequest, recovered: check.recovered });
+      }
+      return this.#settleProvider(
         providers[index],
         () => this.#finishProvider({ opened: check, job, pullRequest, result: final[providers[index]] }),
         invalidateProvider(providers[index], check.checkRunId ?? null),
-      )
-    )));
+      );
+    }));
 
     const latest = await getPullRequest(this.client, access.token, job.owner, job.repo, job.prNumber);
     if (latest.head.sha !== pullRequest.head.sha) {
@@ -507,8 +548,28 @@ export class ReviewEngine {
     const attest = this.config.review.agentAttestations;
     const publishSummary = async () => {
       if (gate.status !== 'completed' || !this.config.review.postPullRequestReview) return;
+      const publicationId = attestationPublicationId({
+        owner: job.owner,
+        repo: job.repo,
+        prNumber: job.prNumber,
+        headSha: pullRequest.head.sha,
+        reviews,
+      });
+      const marker = reviewPublicationMarker({ publicationId, headSha: pullRequest.head.sha });
+      const prior = await listPullRequestReviews(this.client, orchestratorToken, job.owner, job.repo, job.prNumber);
+      const exact = prior.filter((review) => (
+        String(review?.commit_id ?? '').toLowerCase() === pullRequest.head.sha.toLowerCase()
+        && parseReviewPublicationMarkers(review?.body).some((item) => (
+          item.id === publicationId && item.headSha === pullRequest.head.sha.toLowerCase()
+        ))
+      ));
+      if (exact.length > 1) throw new Error('duplicate exact attestation publication reviews found');
+      if (exact.length === 1) {
+        this.metrics?.increment('ores_review_summary_reuses_total', { attest: attest ? 'true' : 'false' });
+        return;
+      }
       await createPullRequestReview(this.client, orchestratorToken, job.owner, job.repo, job.prNumber, {
-        body: summaryBody(reviews, gate, { attest }),
+        body: summaryBody(reviews, gate, { attest, publicationMarker: marker }),
         event: 'COMMENT',
         commitId: pullRequest.head.sha,
       }).catch((error) => {
