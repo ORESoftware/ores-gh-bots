@@ -8,6 +8,7 @@ function validEnvironment() {
     GITHUB_APP_ID: '1',
     GITHUB_APP_PRIVATE_KEY: 'orchestrator-key',
     GITHUB_WEBHOOK_SECRET: 'webhook-secret',
+    OWNER_ALLOWLIST: 'ORESoftware',
     OPENAI_REVIEW_APP_ID: '2',
     OPENAI_REVIEW_APP_PRIVATE_KEY: 'openai-app-key',
     CLAUDE_REVIEW_APP_ID: '3',
@@ -76,4 +77,33 @@ test('required CI app-id mapping cannot name a context outside the required cont
     () => validateRuntimeConfig(config),
     /REQUIRED_CI_APP_IDS context is not required by REQUIRED_CI_CONTEXTS: ci\/security/,
   );
+});
+
+
+test('runtime provider configuration is pinned to Astra and Fable model families', () => {
+  const defaults = loadConfig(validEnvironment());
+  assert.equal(defaults.providers.openai.model, 'gpt-6-astra');
+  assert.equal(defaults.providers.anthropic.model, 'claude-fable-5-1');
+
+  const wrongOpenAI = loadConfig({ ...validEnvironment(), OPENAI_MODEL: 'gpt-5-mini' });
+  assert.throws(() => validateRuntimeConfig(wrongOpenAI), /OPENAI_MODEL must be gpt-6-astra/);
+
+  const wrongAnthropic = loadConfig({ ...validEnvironment(), ANTHROPIC_MODEL: 'claude-sonnet-4-5' });
+  assert.throws(() => validateRuntimeConfig(wrongAnthropic), /ANTHROPIC_MODEL must be claude-fable-5-1/);
+
+  const snapshots = loadConfig({
+    ...validEnvironment(),
+    OPENAI_MODEL: 'gpt-6-astra-2026-09-03',
+    ANTHROPIC_MODEL: 'claude-fable-5-1-2026-09-01',
+  });
+  assert.doesNotThrow(() => validateRuntimeConfig(snapshots));
+});
+
+test('webhook runtime refuses to report ready without an explicit owner scope', () => {
+  const config = loadConfig({ ...validEnvironment(), OWNER_ALLOWLIST: '', OWNER_PATTERNS: '' });
+  assert.throws(
+    () => validateRuntimeConfig(config, { webhook: true, providers: true }),
+    /OWNER_ALLOWLIST or OWNER_PATTERNS is required/,
+  );
+  assert.doesNotThrow(() => validateRuntimeConfig(config, { webhook: false, providers: true }));
 });
