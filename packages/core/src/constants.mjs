@@ -5,6 +5,10 @@ export const CHECK_NAMES = Object.freeze({
 });
 
 export const PROVIDERS = Object.freeze(['openai', 'claude']);
+export const REVIEW_MODELS = Object.freeze({
+  openai: 'gpt-6-astra',
+  claude: 'claude-fable-5-1',
+});
 export const OWN_CHECK_NAMES = new Set(Object.values(CHECK_NAMES));
 
 export const SUPPORTED_PULL_REQUEST_ACTIONS = new Set([

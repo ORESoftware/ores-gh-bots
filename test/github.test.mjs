@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildRulesetPayload,
+  completeFailedCheck,
+  completeGateCheck,
+  completeReviewCheck,
   ensureInProgressCheck,
   permissionCanTriggerReview,
   reviewAnnotations,
@@ -101,4 +104,35 @@ test('manual command permission requires write or stronger', () => {
   assert.equal(permissionCanTriggerReview('triage'), false);
   assert.equal(permissionCanTriggerReview('write'), true);
   assert.equal(permissionCanTriggerReview('admin'), true);
+});
+
+
+test('provider and gate checks do not advertise action buttons without webhook-capable owner Apps', async () => {
+  const bodies = [];
+  const client = {
+    async request(method, path, options) {
+      assert.equal(method, 'PATCH');
+      bodies.push(options.body);
+      return { data: { id: Number(path.split('/').at(-1)), ...options.body } };
+    },
+  };
+  const common = { client, token: 't', owner: 'o', repo: 'r', checkRunId: 9, detailsUrl: undefined };
+  await completeReviewCheck({
+    ...common,
+    name: CHECK_NAMES.openai,
+    review: {
+      verdict: 'approve', summary: 'ok', confidence: 1, risk: 'low',
+      findings: [], tests: [], blocking_reasons: [], model: 'gpt-6-astra',
+    },
+  });
+  await completeFailedCheck({ ...common, name: CHECK_NAMES.claude, summary: 'failed safely' });
+  await completeGateCheck({
+    ...common,
+    gate: {
+      status: 'completed', conclusion: 'success',
+      providerStates: [], ciStates: [], projectionStates: [], dependencyStates: [],
+    },
+  });
+  assert.equal(bodies.length, 3);
+  assert.equal(bodies.every((body) => !Object.hasOwn(body, 'actions')), true);
 });

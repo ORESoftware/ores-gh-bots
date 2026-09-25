@@ -12,7 +12,7 @@
 
 1. Keep rulesets active unless the bot is unable to publish checks and business continuity requires a documented bypass.
 2. Restore provider or GitHub App credentials through the encrypted secret workflow; never paste keys into issues, PRs, or logs.
-3. Re-run a check from its **Re-review** action or add `/ores-review` as a collaborator with write access.
+3. Add `/ores-review` as a collaborator with write access. Provider/gate Check Runs intentionally expose no action buttons because their publishing Apps have no webhook intake.
 4. For missed webhooks, run the reconciler or restart the service; it discovers missing current-SHA checks.
 5. Inspect dead jobs in SQLite and repair the underlying error before re-enqueueing.
 

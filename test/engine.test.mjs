@@ -51,12 +51,12 @@ function fakeClient({ currentSha = HEAD } = {}) {
 
 function providerFetch(url) {
   if (String(url).includes('openai')) {
-    return Promise.resolve(new Response(JSON.stringify({ status: 'completed', output_text: JSON.stringify(approved) }), {
+    return Promise.resolve(new Response(JSON.stringify({ status: 'completed', model: 'gpt-6-astra', output_text: JSON.stringify(approved) }), {
       status: 200, headers: { 'content-type': 'application/json' },
     }));
   }
   if (String(url).includes('anthropic')) {
-    return Promise.resolve(new Response(JSON.stringify({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_code_review', input: approved }] }), {
+    return Promise.resolve(new Response(JSON.stringify({ model: 'claude-fable-5-1', stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_code_review', input: approved }] }), {
       status: 200, headers: { 'content-type': 'application/json' },
     }));
   }

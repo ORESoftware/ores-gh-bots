@@ -1,6 +1,8 @@
 import { labelProvider, reviewTagProviders } from './agent-tags.mjs';
 import { CHECK_NAMES, OWN_CHECK_NAMES, SUPPORTED_PULL_REQUEST_ACTIONS } from './constants.mjs';
 
+const TRUSTED_PR_AUTHOR_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
 function prJob(payload, type = 'review', reason = 'webhook') {
   const pr = payload.pull_request;
   const repository = payload.repository;
@@ -50,15 +52,39 @@ function pullRequestJobs(payload, action) {
   }
   if (!SUPPORTED_PULL_REQUEST_ACTIONS.has(action)) return [];
   const job = prJob(payload, 'review', `pull_request.${action}`);
-  return job
-    ? [{ ...job, force: ['reopened', 'ready_for_review', 'edited'].includes(action) }]
-    : [];
+  if (!job) return [];
+  const association = String(payload.pull_request?.author_association ?? '').toUpperCase();
+  const trustedAuthor = TRUSTED_PR_AUTHOR_ASSOCIATIONS.has(association);
+  return [{
+    ...job,
+    force: ['reopened', 'ready_for_review', 'edited'].includes(action),
+    ...(trustedAuthor ? {} : {
+      needsAuthorization: true,
+      sender: payload.pull_request?.user?.login ?? payload.sender?.login ?? null,
+    }),
+  }];
 }
 
-function checkRunJobs(payload, action) {
+function expectedOwnCheckAppId(name, expectedReviewAppIds) {
+  if (!expectedReviewAppIds) return null;
+  if (name === CHECK_NAMES.openai) return expectedReviewAppIds.openai ?? undefined;
+  if (name === CHECK_NAMES.claude) return expectedReviewAppIds.claude ?? undefined;
+  if (name === CHECK_NAMES.gate) return expectedReviewAppIds.gate ?? undefined;
+  return undefined;
+}
+
+function ownCheckAppMatches(payload, name, expectedReviewAppIds) {
+  if (!expectedReviewAppIds) return true;
+  const expected = expectedOwnCheckAppId(name, expectedReviewAppIds);
+  if (expected === undefined || expected === null || expected === '') return false;
+  return String(payload.check_run?.app?.id ?? '') === String(expected);
+}
+
+function checkRunJobs(payload, action, expectedReviewAppIds = null) {
   const name = payload.check_run?.name;
 
   if (action === 'rerequested' && OWN_CHECK_NAMES.has(name)) {
+    if (!ownCheckAppMatches(payload, name, expectedReviewAppIds)) return [];
     const type = name === CHECK_NAMES.gate ? 'gate' : 'review';
     const job = checkPullRequestJob(payload, type, `check_run.rerequested:${name}`);
     return job ? [{ ...job, force: true }] : [];
@@ -70,6 +96,7 @@ function checkRunJobs(payload, action) {
   }
 
   if (action === 'requested_action' && OWN_CHECK_NAMES.has(name)) {
+    if (!ownCheckAppMatches(payload, name, expectedReviewAppIds)) return [];
     const identifier = payload.requested_action?.identifier;
     const type = name === CHECK_NAMES.gate || identifier === 'regate' ? 'gate' : 'review';
     const job = checkPullRequestJob(payload, type, `check_run.requested_action:${identifier ?? 'unknown'}`);
@@ -104,11 +131,11 @@ function isRoutableJob(job) {
   return Boolean(job.installationId && job.owner && job.repo && job.prNumber);
 }
 
-export function routeWebhookEvent({ event, payload }) {
+export function routeWebhookEvent({ event, payload, expectedReviewAppIds = null }) {
   const action = payload?.action;
   const jobs = [
     ...(event === 'pull_request' ? pullRequestJobs(payload, action) : []),
-    ...(event === 'check_run' ? checkRunJobs(payload, action) : []),
+    ...(event === 'check_run' ? checkRunJobs(payload, action, expectedReviewAppIds) : []),
     ...(event === 'issue_comment' ? issueCommentJobs(payload, action) : []),
   ];
   return jobs.filter(isRoutableJob);

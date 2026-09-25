@@ -135,6 +135,7 @@ export async function completeReviewCheck({ client, token, owner, repo, checkRun
   const text = [
     `Verdict: **${review.verdict}**`,
     `Risk: **${review.risk}** · Confidence: **${Math.round(review.confidence * 100)}%**`,
+    `Model: **${review.model ?? 'unverified'}**`,
     '',
     review.summary,
     findings.length ? `\n## Findings\n${findings.join('\n')}` : '\nNo findings were reported.',
@@ -154,11 +155,6 @@ export async function completeReviewCheck({ client, token, owner, repo, checkRun
       text,
       annotations: reviewAnnotations(review),
     },
-    actions: [{
-      label: 'Re-review',
-      description: 'Run both ORES AI reviewers again for this SHA.',
-      identifier: 'rereview',
-    }],
   });
 }
 
@@ -170,7 +166,6 @@ export async function completeFailedCheck({ client, token, owner, repo, checkRun
     completed_at: new Date().toISOString(),
     details_url: detailsUrl || undefined,
     output: { title: `${name}: failed`, summary: summary.slice(0, 65_535) },
-    actions: [{ label: 'Re-review', description: 'Retry the ORES review.', identifier: 'rereview' }],
   });
 }
 
@@ -204,7 +199,6 @@ export async function completeGateCheck({ client, token, owner, repo, checkRunId
   if (gate.status === 'completed') {
     payload.conclusion = gate.conclusion;
     payload.completed_at = new Date().toISOString();
-    payload.actions = [{ label: 'Re-evaluate', description: 'Re-evaluate provider, CI, contract, and PR-dependency evidence.', identifier: 'regate' }];
   }
   return updateCheckRun(client, token, owner, repo, checkRunId, payload);
 }

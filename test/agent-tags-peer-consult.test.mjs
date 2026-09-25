@@ -180,8 +180,8 @@ function fakeClient({ failReviews = false } = {}) {
 }
 
 const json = (body) => Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } }));
-const openaiReply = (review) => json({ status: 'completed', output_text: JSON.stringify(review) });
-const claudeReply = (review) => json({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_code_review', input: review }] });
+const openaiReply = (review) => json({ status: 'completed', model: 'gpt-6-astra', output_text: JSON.stringify(review) });
+const claudeReply = (review) => json({ model: 'claude-fable-5-1', stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'submit_code_review', input: review }] });
 
 function engineWith({ env, fetchImpl, failReviews = false }) {
   const queue = new SqliteQueue({ path: ':memory:' });

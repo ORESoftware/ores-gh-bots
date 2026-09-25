@@ -3,6 +3,7 @@ import {
   isLocallyVerifiedContractProjectionAdmission,
 } from './contract-admission.mjs';
 import { normalizeDependencyGateStates } from './pr-dependencies.mjs';
+import { providerModelMatches } from './model-identity.mjs';
 
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const HEX_160 = /^[a-f0-9]{40}$/u;
@@ -163,6 +164,7 @@ export function evaluateGate({
   ci = [],
   requiredCiContexts = [],
   requiredCiAppIds = {},
+  requiredProviderModels = {},
   projectionAdmissions = [],
   requiredProjectionKinds = [],
   projectionContext = null,
@@ -172,8 +174,16 @@ export function evaluateGate({
     const review = reviews?.[provider] ?? null;
     if (!review) return { provider, state: 'pending', reason: 'review missing' };
     if (review.error) return { provider, state: 'failure', reason: review.error };
+    const expectedModel = requiredProviderModels?.[provider] ?? null;
+    if (expectedModel && !providerModelMatches(expectedModel, review.model)) {
+      return {
+        provider,
+        state: 'failure',
+        reason: `model identity mismatch: expected ${expectedModel}, received ${review.model ?? 'missing'}`,
+      };
+    }
     if (review.verdict !== 'approve') return { provider, state: 'failure', reason: `verdict=${review.verdict}` };
-    return { provider, state: 'success', reason: 'approved' };
+    return { provider, state: 'success', reason: expectedModel ? `approved by ${review.model}` : 'approved' };
   });
 
   const ciByContext = new Map();

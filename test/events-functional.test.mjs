@@ -8,7 +8,12 @@ function pullRequestPayload(action = 'opened') {
     action,
     installation: { id: 77 },
     repository: { name: 'repo', owner: { login: 'ORG' } },
-    pull_request: { number: 9, head: { sha: 'abc123' } },
+    pull_request: {
+      number: 9,
+      head: { sha: 'abc123' },
+      user: { login: 'alex' },
+      author_association: 'MEMBER',
+    },
     sender: { login: 'alex' },
   };
 }
@@ -72,4 +77,47 @@ test('candidate jobs missing routing identity are filtered instead of escaping p
     check_run: { name: 'ci/verify', head_sha: 'abc123', pull_requests: [{ number: 9 }] },
   };
   assert.deepEqual(routeWebhookEvent({ event: 'check_run', payload: externalCheckWithoutRepository }), []);
+});
+
+
+test('external PR authors require collaborator authorization before provider spend', () => {
+  const payload = pullRequestPayload('opened');
+  payload.pull_request.author_association = 'CONTRIBUTOR';
+  payload.pull_request.user.login = 'external-user';
+
+  const [job] = routeWebhookEvent({ event: 'pull_request', payload });
+  assert.equal(job.needsAuthorization, true);
+  assert.equal(job.sender, 'external-user');
+
+  for (const association of ['OWNER', 'MEMBER', 'COLLABORATOR']) {
+    const trusted = pullRequestPayload('synchronize');
+    trusted.pull_request.author_association = association;
+    const [trustedJob] = routeWebhookEvent({ event: 'pull_request', payload: trusted });
+    assert.equal(trustedJob.needsAuthorization, undefined, association);
+  }
+});
+
+test('rereview Check Run actions are bound to the configured ORES App identity', () => {
+  const expectedReviewAppIds = { openai: '2', claude: '3', gate: '4' };
+  const payload = {
+    action: 'rerequested',
+    installation: { id: 77 },
+    repository: { name: 'repo', owner: { login: 'ORG' } },
+    check_run: {
+      name: 'ores-review/openai',
+      head_sha: 'abc123',
+      app: { id: 999 },
+      pull_requests: [{ number: 9 }],
+    },
+  };
+
+  assert.deepEqual(routeWebhookEvent({ event: 'check_run', payload, expectedReviewAppIds }), []);
+  payload.check_run.app.id = 2;
+  const [trusted] = routeWebhookEvent({ event: 'check_run', payload, expectedReviewAppIds });
+  assert.equal(trusted.type, 'review');
+
+  payload.action = 'requested_action';
+  payload.requested_action = { identifier: 'rereview' };
+  payload.check_run.app.id = 999;
+  assert.deepEqual(routeWebhookEvent({ event: 'check_run', payload, expectedReviewAppIds }), []);
 });

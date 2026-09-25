@@ -1,3 +1,4 @@
+import { requireProviderModel } from '../../core/src/model-identity.mjs';
 import { REVIEW_SYSTEM_PROMPT, buildReviewEnvelope } from '../../core/src/prompt.mjs';
 import { reviewJsonSchema, validateReviewResult } from '../../core/src/review-schema.mjs';
 import { postJson } from './http.mjs';
@@ -56,6 +57,7 @@ export async function reviewWithOpenAI({ config, context, fetchImpl = fetch }) {
   if (response?.status && !['completed', 'in_progress'].includes(response.status)) {
     throw new Error(`OpenAI response status was ${response.status}`);
   }
+  const model = requireProviderModel({ provider: 'OpenAI', expected: config.model, observed: response?.model });
   const parsed = JSON.parse(extractOpenAIText(response));
-  return validateReviewResult(parsed, { maxFindings: context.maxFindings });
+  return { ...validateReviewResult(parsed, { maxFindings: context.maxFindings }), model };
 }

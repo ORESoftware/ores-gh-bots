@@ -1,6 +1,7 @@
-import { DEFAULTS } from './constants.mjs';
+import { DEFAULTS, REVIEW_MODELS } from './constants.mjs';
 import { loadContractAdmissionPolicyFile } from './contract-policy.mjs';
 import { peerConsultMode } from './peer-consult.mjs';
+import { providerModelMatches } from './model-identity.mjs';
 
 const REVIEWER_APPROVAL_MODES = new Set(['off', 'requested-gate-success']);
 const REVIEWER_LOGIN_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/u;
@@ -131,13 +132,13 @@ export function loadConfig(env = process.env) {
       openai: {
         apiKey: optionalString(env.OPENAI_API_KEY),
         baseUrl: optionalString(env.OPENAI_BASE_URL) ?? 'https://api.openai.com',
-        model: optionalString(env.OPENAI_MODEL) ?? 'gpt-5-mini',
+        model: optionalString(env.OPENAI_MODEL) ?? REVIEW_MODELS.openai,
         maxOutputTokens: integer(env.OPENAI_MAX_OUTPUT_TOKENS, 8_000, { min: 256 }),
       },
       anthropic: {
         apiKey: optionalString(env.ANTHROPIC_API_KEY),
         baseUrl: optionalString(env.ANTHROPIC_BASE_URL) ?? 'https://api.anthropic.com',
-        model: optionalString(env.ANTHROPIC_MODEL) ?? 'claude-sonnet-4-5',
+        model: optionalString(env.ANTHROPIC_MODEL) ?? REVIEW_MODELS.claude,
         maxTokens: integer(env.ANTHROPIC_MAX_TOKENS, 8_000, { min: 256 }),
         version: optionalString(env.ANTHROPIC_VERSION) ?? '2023-06-01',
       },
@@ -234,6 +235,22 @@ function duplicateAppIdentity(config) {
 export function validateRuntimeConfig(config, { webhook = true, providers = true } = {}) {
   const missing = missingRuntimeConfig(config, { webhook, providers });
   if (missing.length) throw new Error(`Missing required configuration: ${missing.join(', ')}`);
+
+  if (webhook && config.github.ownerAllowlist.length === 0 && config.github.ownerPatterns.length === 0) {
+    throw new Error('OWNER_ALLOWLIST or OWNER_PATTERNS is required when webhook intake is enabled');
+  }
+
+  if (providers) {
+    const configuredModels = [
+      ['OPENAI_MODEL', config.providers.openai.model, REVIEW_MODELS.openai],
+      ['ANTHROPIC_MODEL', config.providers.anthropic.model, REVIEW_MODELS.claude],
+    ];
+    for (const [variable, actual, required] of configuredModels) {
+      if (!providerModelMatches(required, actual)) {
+        throw new Error(`${variable} must be ${required} or an immutable dated snapshot of it; received ${actual ?? 'missing'}`);
+      }
+    }
+  }
 
   if (!config.security?.allowSharedAppIdentity) {
     const duplicate = duplicateAppIdentity(config);

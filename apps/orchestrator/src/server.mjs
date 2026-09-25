@@ -127,7 +127,18 @@ export function createWebhookServer({ config, queue, logger, metrics, readiness 
         payload,
         expectedGateAppId: config.apps?.gate?.id ?? null,
       });
-      const jobs = [...routeWebhookEvent({ event, payload }), ...dependencyJobs];
+      const jobs = [
+        ...routeWebhookEvent({
+          event,
+          payload,
+          expectedReviewAppIds: {
+            openai: config.apps?.openai?.id ?? null,
+            claude: config.apps?.claude?.id ?? null,
+            gate: config.apps?.gate?.id ?? null,
+          },
+        }),
+        ...dependencyJobs,
+      ];
       const accepted = queue.acceptWebhook({
         deliveryId,
         event,

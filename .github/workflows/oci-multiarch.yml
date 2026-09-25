@@ -200,6 +200,7 @@ jobs:
             --env GATE_APP_ID=4 \
             --env GATE_APP_PRIVATE_KEY=dummy \
             --env GITHUB_WEBHOOK_SECRET=dummy \
+            --env OWNER_ALLOWLIST=ORESoftware \
             --env GHA_MODE=offload \
             --env GHA_DISPATCH_TOKEN=dummy \
             --env RECONCILE_ENABLED=false \
