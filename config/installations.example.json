@@ -85,6 +85,19 @@
           "repositories": []
         }
       ]
+    },
+    "hardening": {
+      "appId": null,
+      "slug": "replace-with-fleet-hardening-app-slug",
+      "visibility": "public-unlisted",
+      "installations": [
+        {
+          "account": "replace-with-org-login",
+          "installationId": null,
+          "repositorySelection": "all",
+          "repositories": []
+        }
+      ]
     }
   }
 }

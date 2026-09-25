@@ -99,6 +99,21 @@
         "MERGE_REAPER_APP_ID",
         "MERGE_REAPER_APP_PRIVATE_KEY"
       ]
+    },
+    "hardening": {
+      "manifest": "fleet-hardening.manifest.json",
+      "visibility": "public-unlisted",
+      "installationScope": "fleet",
+      "permissions": {
+        "contents": "write",
+        "metadata": "read",
+        "pull_requests": "write"
+      },
+      "events": [],
+      "secretEnv": [
+        "FLEET_HARDENING_APP_ID",
+        "FLEET_HARDENING_APP_PRIVATE_KEY"
+      ]
     }
   }
 }

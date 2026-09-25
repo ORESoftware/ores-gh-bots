@@ -1,6 +1,6 @@
 # GitHub App registration
 
-ORES uses four mandatory review-runtime identities plus a separately restricted Actions dispatcher and a separately authenticated merge reaper. The Apps remain independent in production so a single credential cannot publish provider decisions, publish the aggregate gate, and perform the final merge effect.
+ORES uses four mandatory review-runtime identities plus three separately scoped effect/control identities: the Actions dispatcher, Merge Reaper, and Fleet Hardening App. The Apps remain independent in production so no single credential can publish provider decisions, publish the aggregate gate, create fleet policy proposals, and perform final merge effects.
 
 | Role | Visibility | Installation | Exact repository permissions | Webhook events |
 |---|---|---|---|---|
@@ -9,16 +9,17 @@ ORES uses four mandatory review-runtime identities plus a separately restricted 
 | Claude reviewer | Public, not Marketplace-listed | Every managed organization | Checks: write; Metadata: read | None |
 | Review gate | Public, not Marketplace-listed | Every managed organization | Checks: write; Metadata: read | None |
 | Actions dispatcher | Private | Only `ORESoftware/ores-gh-bots` | Actions: write; Metadata: read | None |
-| Merge reaper | Public, not Marketplace-listed | Every managed organization selected for merge automation | Checks: read; Contents: write; Metadata: read; Pull requests: write; Commit statuses: read | None |
+| Merge reaper | Public, not Marketplace-listed | Organizations selected for merge automation | Checks: read; Contents: write; Metadata: read; Pull requests: write; Commit statuses: read | None |
+| Fleet hardening | Public, not Marketplace-listed | Organizations selected for fleet-hardening proposals | Contents: write; Metadata: read; Pull requests: write | None |
 
-A private GitHub App can only be installed on the account that owns it. The fleet Apps are therefore public so they can be installed across the separate ORES organizations. Public visibility does **not** list an App in GitHub Marketplace; do not submit these Apps for Marketplace publication.
+A private GitHub App can only be installed on the account that owns it. Fleet Apps are therefore public so they can be installed across separate ORES organizations. Public visibility does **not** list an App in GitHub Marketplace; do not submit these Apps for Marketplace publication.
 
-`github-apps/policy.json` is authoritative. `npm run verify:github-apps` rejects permission, visibility, event, inventory, or required-secret drift. Any permission increase requires a reviewed policy change and a corresponding threat-model update. The Orchestrator's `Contents: read` permission is used only for exact-head machine-readable dependency-version evidence; PR titles are not version authority. The merge reaper must remain a distinct App from the review Gate App so the identity that certifies `ores-review/gate` cannot also exercise the merge capability.
+`github-apps/policy.json` is authoritative. `npm run verify:github-apps` rejects permission, visibility, event, inventory, or required-secret drift. Any permission increase requires a reviewed policy change and corresponding threat-model update. The Orchestrator's `Contents: read` permission is used only for exact-head machine-readable evidence. The Gate, Merge Reaper, and Fleet Hardening Apps must remain distinct identities: the Gate certifies review state, the Reaper may merge after admission, and Fleet Hardening may only create proposal branches and PRs.
 
 ## Manifest bootstrap
 
 1. Enter the repository tool shell with `nix develop`. Keep shell tracing disabled for all registration and conversion commands.
-2. Create a registration form and a separate private callback-state record for each role. Only the orchestrator requires the deployed HTTPS base URL for webhook/callback endpoints; passing the base URL to non-webhook roles is harmless because their manifests contain no runtime URLs:
+2. Create a registration form and separate private callback-state record for each role. Only the orchestrator requires the deployed HTTPS base URL for webhook/callback endpoints:
 
    ```sh
    just app-form orchestrator ORESoftware https://bots.example.internal /tmp/orchestrator.html /tmp/orchestrator.state.json
@@ -27,6 +28,7 @@ A private GitHub App can only be installed on the account that owns it. The flee
    just app-form gate ORESoftware https://bots.example.internal /tmp/gate.html /tmp/gate.state.json
    just app-form actions ORESoftware https://bots.example.internal /tmp/actions.html /tmp/actions.state.json
    just app-form reaper ORESoftware https://bots.example.internal /tmp/reaper.html /tmp/reaper.state.json
+   just app-form hardening ORESoftware https://bots.example.internal /tmp/hardening.html /tmp/hardening.state.json
    ```
 
    Both files are written with mode `0600`. The random state is stored only in the state record and is not printed.
@@ -44,15 +46,17 @@ A private GitHub App can only be installed on the account that owns it. The flee
    unset GITHUB_MANIFEST_CODE GITHUB_MANIFEST_STATE
    ```
 
-   Repeat for `openai`, `claude`, `gate`, `actions`, and `reaper` with the corresponding state file. The converter rejects callback-state mismatches and expired state records before contacting GitHub. It also rejects `--code` and `--state`, supports mode-`0600` `--code-file` and `--callback-state-file` inputs for non-interactive operators, and deletes the state record only after a successful conversion.
-5. The helper writes mode-`0600` dotenv fragments under ignored `env/dec/registrations/` without printing private keys, webhook secrets, callback state, or conversion codes. Copy the fragments into `env/dec/review-bots.env`, add the OpenAI and Anthropic provider credentials, then follow `env/README.md` to validate and encrypt the runtime secret.
+   Repeat for `openai`, `claude`, `gate`, `actions`, `reaper`, and `hardening` with the corresponding state file. The converter rejects callback-state mismatches and expired state records before contacting GitHub. It also rejects `--code` and `--state`, supports mode-`0600` `--code-file` and `--callback-state-file` inputs for non-interactive operators, and deletes the state record only after a successful conversion.
+5. The helper writes mode-`0600` dotenv fragments under ignored `env/dec/registrations/` without printing private keys, webhook secrets, callback state, or conversion codes. Copy the fragments into `env/dec/review-bots.env`, add provider credentials, then follow `env/README.md` to validate and encrypt the runtime secret.
 
-The conversion endpoint may use `GITHUB_MANIFEST_TOKEN` from the process environment when your GitHub policy requires authentication. Never pass a token, one-time code, or callback state as a command-line argument.
+The conversion endpoint may use `GITHUB_MANIFEST_TOKEN` from the process environment when GitHub policy requires authentication. Never pass a token, one-time code, or callback state as a command-line argument.
 
 ## Installation inventory
 
 Copy `config/installations.example.json` to the reviewed inventory location used by deployment automation and replace all `null` and `replace-with-*` values. Install the four review-runtime public Apps on every target organization. During canarying, selected repositories are acceptable; before fleet enforcement, every governed repository must appear in the inventory or be covered by an `all` installation.
 
-Install the public merge-reaper App only on organizations intended to participate in merge automation; `reaper plan` is the mandatory first exercise. Install the private Actions dispatcher only on `ORESoftware/ores-gh-bots` with selected-repository access. The verifier rejects any broader dispatcher inventory.
+Install the public Merge Reaper App only on organizations intended to participate in merge automation; `reaper plan` is the mandatory first exercise. Install the public Fleet Hardening App only on organizations intended to receive policy proposals; `hardening plan` against one paired test organization is the mandatory first exercise. Fleet Hardening does not need checks, statuses, administration, or merge permission.
 
-Production must keep `ALLOW_SHARED_APP_IDENTITY=false`. Rulesets must pin the OpenAI, Claude, and aggregate contexts to their registered App IDs. Merge-reaper activation additionally requires `MERGE_REAPER_APP_ID` to differ from `GATE_APP_ID`; see `docs/MERGE_REAPER.md`.
+Install the private Actions dispatcher only on `ORESoftware/ores-gh-bots` with selected-repository access. The verifier rejects any broader dispatcher inventory.
+
+Production must keep `ALLOW_SHARED_APP_IDENTITY=false`. Rulesets must pin the OpenAI, Claude, and aggregate contexts to their registered App IDs. Merge-reaper activation requires `MERGE_REAPER_APP_ID` to differ from `GATE_APP_ID`. Fleet-hardening activation likewise uses its own `FLEET_HARDENING_APP_ID`; do not reuse the Gate or Reaper identity.

@@ -1,60 +1,104 @@
-name: Fleet hardening
+name: Fleet hardening plan
 
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: plan or apply
+      organization:
+        description: Exactly one organization to inspect
         required: true
-        default: plan
+        type: string
+      environment:
+        description: Expected organization environment
+        required: true
         type: choice
-        options: [plan, apply]
-      organizations:
-        description: Optional comma-separated organization allowlist
-        required: false
-        type: string
+        options:
+          - test
+          - production
       include_repositories:
-        description: Write policy markers to every repository
+        description: Include in-scope repository policy proposals in the plan
         required: true
         default: false
         type: boolean
-      ensure_repositories:
-        description: Create policy and explicitly required repositories when missing
+      max_repositories:
+        description: Maximum repositories to inspect
         required: true
-        default: false
-        type: boolean
-      confirmation:
-        description: Apply requires HARDEN-<change-ticket>
-        required: false
-        type: string
-  schedule:
-    - cron: '17 7 * * *'
+        default: 500
+        type: number
 
 permissions:
   contents: read
 
 concurrency:
-  group: fleet-hardening-${{ github.ref }}
-  cancel-in-progress: false
+  group: fleet-hardening-plan-${{ github.ref }}-${{ inputs.organization }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
 
 jobs:
-  hardening:
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      OWNER_ALLOWLIST: ${{ vars.OWNER_ALLOWLIST }}
+      OWNER_PATTERNS: ${{ vars.OWNER_PATTERNS }}
+      FLEET_HARDENING_APP_ID: ${{ secrets.FLEET_HARDENING_APP_ID }}
+      FLEET_HARDENING_APP_PRIVATE_KEY: ${{ secrets.FLEET_HARDENING_APP_PRIVATE_KEY }}
+      HARDENING_SOURCE_REVISION: ${{ github.sha }}
+      HARDENING_ORGANIZATION: ${{ inputs.organization }}
+      HARDENING_EXPECTED_ENVIRONMENT: ${{ inputs.environment }}
+      HARDENING_INCLUDE_REPOSITORIES: ${{ inputs.include_repositories }}
+      HARDENING_MAX_REPOSITORIES: ${{ inputs.max_repositories }}
+      HARDENING_OUTPUT: fleet-hardening-plan.json
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Check out exact workflow revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          node-version: '22'
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
           cache: npm
-      - run: npm ci
-      - name: Validate and execute bounded fleet rollout
-        run: node apps/cli/src/hardening.mjs
-        env:
-          GITHUB_ADMIN_TOKEN: ${{ secrets.GITHUB_ADMIN_TOKEN }}
-          HARDENING_ACTION: ${{ github.event_name == 'schedule' && 'plan' || inputs.mode }}
-          HARDENING_ORGANIZATIONS: ${{ inputs.organizations }}
-          HARDENING_INCLUDE_REPOSITORIES: ${{ github.event_name == 'schedule' && 'false' || inputs.include_repositories }}
-          HARDENING_ENSURE_REPOSITORIES: ${{ github.event_name == 'schedule' && 'false' || inputs.ensure_repositories }}
-          HARDENING_CONFIRMATION: ${{ inputs.confirmation }}
-          HARDENING_CONTINUE: 'true'
+
+      - name: Install exact lockfile without dependency lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Build reviewed flags2env native boundary
+        run: npm run build:flags2env
+
+      - name: Verify repository before reading fleet state
+        run: npm run check && npm run verify
+
+      - name: Build no-write exact-head plan
+        run: node apps/cli/src/hardening.mjs hardening plan > fleet-hardening-plan-receipt.json
+
+      - name: Replace private plan with content-free receipt
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const receipt = JSON.parse(fs.readFileSync('fleet-hardening-plan-receipt.json', 'utf8'));
+          if (!/^sha256:[0-9a-f]{64}$/.test(receipt.plan_digest ?? '')) throw new Error('plan digest missing');
+          const safe = {
+            action: 'plan',
+            organization: receipt.organization,
+            environment: receipt.environment,
+            operation_count: receipt.operation_count,
+            plan_digest: receipt.plan_digest,
+            private_plan_uploaded: false,
+          };
+          fs.writeFileSync('fleet-hardening-public-receipt.json', `${JSON.stringify(safe, null, 2)}\n`, { mode: 0o600 });
+          fs.rmSync('fleet-hardening-plan.json');
+          fs.rmSync('fleet-hardening-plan-receipt.json');
+          NODE
+
+      - name: Upload content-free planning receipt only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: fleet-hardening-plan-receipt-${{ github.run_id }}
+          path: fleet-hardening-public-receipt.json
+          if-no-files-found: error
+          retention-days: 30

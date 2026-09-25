@@ -1,0 +1,11 @@
+{
+  "name": "ORES Fleet Hardening",
+  "url": "https://github.com/ORESoftware/ores-gh-bots",
+  "public": true,
+  "default_permissions": {
+    "contents": "write",
+    "metadata": "read",
+    "pull_requests": "write"
+  },
+  "default_events": []
+}

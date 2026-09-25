@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  applyOrganizationHardening,
   normalizeSqlNamespace,
   organizationPolicyDocument,
   upsertRepositoryTextFile,
@@ -50,7 +51,7 @@ test('organization policy merges defaults with namespace-specific settings', () 
   assert.equal(policy.spec.infrastructure.k8s_cluster_repository, 'ORESoftware/k8s-cluster');
 });
 
-test('file upsert is idempotent when canonical text is unchanged', async () => {
+test('file upsert is idempotent on an explicit proposal branch', async () => {
   const client = {
     async request(method) {
       assert.equal(method, 'GET');
@@ -58,7 +59,29 @@ test('file upsert is idempotent when canonical text is unchanged', async () => {
     },
   };
   const result = await upsertRepositoryTextFile(client, 'token', {
-    owner: 'o', repo: 'r', path: 'policy.json', content: '{"ok":true}', message: 'x', dryRun: false,
+    owner: 'o', repo: 'r', path: 'policy.json', content: '{"ok":true}', message: 'x', branch: 'ores/proposal', dryRun: false,
   });
   assert.equal(result.action, 'unchanged');
+});
+
+test('direct default-branch writes fail before any GitHub request', async () => {
+  let requests = 0;
+  const client = { async request() { requests += 1; throw new Error('must not be called'); } };
+  await assert.rejects(
+    upsertRepositoryTextFile(client, 'token', {
+      owner: 'o', repo: 'r', path: 'policy.json', content: '{}', message: 'x', dryRun: false,
+    }),
+    /Direct default-branch file writes are forbidden/,
+  );
+  assert.equal(requests, 0);
+});
+
+test('legacy fleet apply fails closed before repository mutation', async () => {
+  let requests = 0;
+  const client = { async request() { requests += 1; throw new Error('must not be called'); } };
+  await assert.rejects(
+    applyOrganizationHardening(client, 'token', fleet, fleet.organizations[0], { dryRun: false, ensureRepositories: true }),
+    /Legacy direct fleet-hardening apply is disabled/,
+  );
+  assert.equal(requests, 0);
 });

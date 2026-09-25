@@ -95,6 +95,7 @@ if (group === 'manifest' && action === 'print') {
     'gate-reviewer',
     'actions-dispatcher',
     'merge-reaper',
+    'fleet-hardening',
   ]);
   if (!allowed.has(role)) throw new Error(`Unknown manifest role: ${role}`);
   console.log(await readFile(resolve(root, `github-apps/${role}.manifest.json`), 'utf8'));
