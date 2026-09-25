@@ -85,3 +85,11 @@ test('credentials remain environment-only and active executable boundaries use t
   assert.match(orchestrator, /if \(cli\.command\) throw/u);
   assert.match(runner, /cli\.command !== 'review'/u);
 });
+
+
+test('review-dispatch invokes the literal review command while request values remain environment-only', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/review-dispatch.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /run: node apps\/runner\/src\/main\.mjs review/u);
+  assert.match(workflow, /REQUIRED_CI_APP_IDS: \$\{\{ vars\.REQUIRED_CI_APP_IDS \}\}/u);
+  assert.doesNotMatch(workflow, /run:[^\n]*\$\{\{ inputs\./u);
+});
