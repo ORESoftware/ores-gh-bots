@@ -1,3 +1,4 @@
+import { requireProviderModel } from '../../core/src/model-identity.mjs';
 import { REVIEW_SYSTEM_PROMPT, buildReviewEnvelope } from '../../core/src/prompt.mjs';
 import { reviewJsonSchema, validateReviewResult } from '../../core/src/review-schema.mjs';
 import { postJson } from './http.mjs';
@@ -38,5 +39,6 @@ export async function reviewWithAnthropic({ config, context, fetchImpl = fetch }
     fetchImpl,
   });
   if (response?.stop_reason === 'max_tokens') throw new Error('Anthropic review was truncated at max_tokens');
-  return validateReviewResult(extractAnthropicReview(response), { maxFindings: context.maxFindings });
+  const model = requireProviderModel({ provider: 'Anthropic', expected: config.model, observed: response?.model });
+  return { ...validateReviewResult(extractAnthropicReview(response), { maxFindings: context.maxFindings }), model };
 }
