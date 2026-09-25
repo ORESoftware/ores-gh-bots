@@ -475,6 +475,10 @@ export class ReviewEngine {
     const dependencyEvidence = await this.#dependencyEvidence(job, pullRequest);
     const gateInputs = {
       reviews,
+      requiredProviderModels: {
+        openai: this.config.providers.openai.model,
+        claude: this.config.providers.anthropic.model,
+      },
       ci,
       requiredCiContexts: this.config.review.requiredCiContexts,
       requiredCiAppIds: this.config.review.requiredCiAppIds,
