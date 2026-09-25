@@ -167,7 +167,7 @@ function seedApprovals(queue, headSha) {
       prNumber: 1,
       headSha,
       provider,
-      result: approved,
+      result: { ...approved, model: provider === 'openai' ? 'gpt-6-astra' : 'claude-fable-5-1' },
       checkRunId: provider === 'openai' ? 11 : 12,
     });
   }
