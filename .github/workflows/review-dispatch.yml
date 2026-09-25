@@ -79,8 +79,9 @@ jobs:
           GATE_APP_ID: ${{ secrets.GATE_APP_ID }}
           GATE_APP_PRIVATE_KEY: ${{ secrets.GATE_APP_PRIVATE_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-mini' }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-6-astra' }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL || 'claude-sonnet-4-5' }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL || 'claude-fable-5-1' }}
           REQUIRED_CI_CONTEXTS: ${{ vars.REQUIRED_CI_CONTEXTS }}
-        run: node apps/runner/src/main.mjs
+          REQUIRED_CI_APP_IDS: ${{ vars.REQUIRED_CI_APP_IDS }}
+        run: node apps/runner/src/main.mjs review
