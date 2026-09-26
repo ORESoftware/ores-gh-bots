@@ -93,3 +93,10 @@ test('review-dispatch invokes the literal review command while request values re
   assert.match(workflow, /REQUIRED_CI_APP_IDS: \$\{\{ vars\.REQUIRED_CI_APP_IDS \}\}/u);
   assert.doesNotMatch(workflow, /run:[^\n]*\$\{\{ inputs\./u);
 });
+
+test('read-only inventory is admitted by flags2env without an output truncation flag', () => {
+  const inventory = resolveCli(['node', 'cli', 'fleet', 'inventory'], { env: {} });
+  assert.equal(inventory.command, 'fleet inventory');
+  assert.throws(() => resolveCli(['node', 'cli', 'fleet', 'inventory', '--limit', '1'], { env: {} }),
+    /flags-2-env rejected CLI input/u);
+});
