@@ -129,6 +129,9 @@ help = "Print one checked-in GitHub App manifest; ROLE is positional."
 [commands.fleet]
 help = "Discover repositories visible to the orchestrator GitHub App."
 
+[commands.fleet.commands.inventory]
+help = "Read-only App inventory with explicit visibility gaps and unclassified repository metadata."
+
 [commands.fleet.commands.discover]
 help = "Discover the installed repository fleet."
 

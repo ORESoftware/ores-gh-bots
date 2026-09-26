@@ -18,3 +18,4 @@ export * from './reviewer-hints.mjs';
 export * from './reviewer-queue.mjs';
 
 export * from './merge-reaper.mjs';
+export * from './fleet-inventory.mjs';
