@@ -6,7 +6,11 @@ import {
   fetchWorkflowRunEvidence,
 } from '../packages/github/src/actions.mjs';
 
-function mockClient({ workflowRun = { id: 77 }, jobs = [] } = {}) {
+const SHA = 'a'.repeat(40);
+const run = (extra = {}) => ({ id: 77, run_attempt: 2, head_sha: SHA, repository: { full_name: 'owner/repo' }, ...extra });
+const boundJob = (extra = {}) => ({ id: 1, run_id: 77, run_attempt: 2, head_sha: SHA, ...extra });
+
+function mockClient({ workflowRun = run(), jobs = [] } = {}) {
   const calls = [];
   return {
     calls,
@@ -40,21 +44,21 @@ test('dispatchWorkflow validates repository shape and stringifies inputs', async
   );
 });
 
-test('fetchWorkflowRunEvidence reads the run and all latest-attempt jobs', async () => {
-  const jobs = [{ id: 1 }, { id: 2 }];
-  const client = mockClient({ workflowRun: { id: 77, conclusion: 'failure' }, jobs });
+test('fetchWorkflowRunEvidence pins jobs to the observed attempt', async () => {
+  const jobs = [boundJob(), boundJob({ id: 2 })];
+  const client = mockClient({ workflowRun: run({ conclusion: 'failure' }), jobs });
   const controller = new AbortController();
   const evidence = await fetchWorkflowRunEvidence(client, 'token', 'owner/repo', '77', {
     signal: controller.signal,
   });
 
-  assert.deepEqual(evidence.workflow_run, { id: 77, conclusion: 'failure' });
+  assert.deepEqual(evidence.workflow_run, run({ conclusion: 'failure' }));
   assert.deepEqual(evidence.jobs, jobs);
   assert.equal(Object.isFrozen(evidence), true);
   assert.equal(Object.isFrozen(evidence.jobs), true);
   assert.deepEqual(client.calls.map(({ type, method, path }) => ({ type, method, path })), [
     { type: 'request', method: 'GET', path: '/repos/owner/repo/actions/runs/77' },
-    { type: 'paginate', method: undefined, path: '/repos/owner/repo/actions/runs/77/jobs?filter=latest&per_page=100' },
+    { type: 'paginate', method: undefined, path: '/repos/owner/repo/actions/runs/77/attempts/2/jobs?per_page=100' },
   ]);
   assert.equal(client.calls[0].options.signal, controller.signal);
   assert.equal(client.calls[1].options.signal, controller.signal);
@@ -73,15 +77,16 @@ test('fetchWorkflowRunEvidence rejects unsafe run identifiers before network cal
 
 test('classifyWorkflowRun composes remote evidence with the core classifier', async () => {
   const client = mockClient({
-    workflowRun: { id: 91, status: 'completed', conclusion: 'failure' },
-    jobs: [{
+    workflowRun: run({ id: 91, status: 'completed', conclusion: 'failure' }),
+    jobs: [boundJob({
       id: 1,
+      run_id: 91,
       status: 'completed',
       conclusion: 'action_required',
       runner_id: 0,
       runner_name: '',
       steps: [],
-    }],
+    })],
   });
   const result = await classifyWorkflowRun(client, 'token', 'owner/repo', 91);
   assert.equal(result.outcome, 'admission_failure');
@@ -89,8 +94,48 @@ test('classifyWorkflowRun composes remote evidence with the core classifier', as
   assert.equal(result.retryable_without_code_change, false);
 });
 
-test('job pagination starts from a path without a query string', async () => {
+test('job pagination requires complete evidence', async () => {
   const client = mockClient();
   await fetchWorkflowRunEvidence(client, 'token', 'owner/repo', 77);
-  assert.equal(client.calls[1].path, '/repos/owner/repo/actions/runs/77/jobs?filter=latest&per_page=100');
+  assert.equal(client.calls[1].options.requireComplete, true);
+  assert.equal(client.calls[1].path, '/repos/owner/repo/actions/runs/77/attempts/2/jobs?per_page=100');
+});
+
+test('candidate head mismatch is rejected before fetching jobs', async () => {
+  const client = mockClient();
+  await assert.rejects(() => fetchWorkflowRunEvidence(client, 'token', 'owner/repo', 77,
+    { expectedHeadSha: 'b'.repeat(40) }), /expected candidate head/);
+  assert.equal(client.calls.length, 1);
+});
+
+test('malformed expected candidate is rejected before network access', async () => {
+  for (const expectedHeadSha of ['main', '', null, {}, 'a'.repeat(39)]) {
+    const client = mockClient();
+    await assert.rejects(() => fetchWorkflowRunEvidence(client, 'token', 'owner/repo', 77,
+      { expectedHeadSha }), /Expected head SHA/);
+    assert.equal(client.calls.length, 0);
+  }
+});
+
+test('run and job identity substitutions cannot certify a candidate', async () => {
+  for (const override of [{ id: 78 }, { run_attempt: 0 }, { head_sha: 'main' },
+    { repository: { full_name: 'another/repo' } }]) {
+    await assert.rejects(() => fetchWorkflowRunEvidence(mockClient({ workflowRun: run(override) }),
+      'token', 'owner/repo', 77), /run identity/);
+  }
+  for (const override of [{ run_id: 78 }, { run_attempt: 3 }, { head_sha: 'b'.repeat(40) }, { id: undefined }]) {
+    await assert.rejects(() => fetchWorkflowRunEvidence(mockClient({ jobs: [boundJob(override)] }),
+      'token', 'owner/repo', 77), /Workflow jobs/);
+  }
+  await assert.rejects(() => fetchWorkflowRunEvidence(mockClient({ jobs: [boundJob(), boundJob()] }),
+    'token', 'owner/repo', 77), /Workflow jobs/);
+});
+
+test('exact head success remains usable without mutating the response', async () => {
+  const workflowRun = run({ status: 'completed', conclusion: 'success' });
+  const jobs = [boundJob({ status: 'completed', conclusion: 'success',
+    steps: [{ status: 'completed', conclusion: 'success' }] })];
+  const result = await classifyWorkflowRun(mockClient({ workflowRun, jobs }), 'token', 'owner/repo', 77,
+    { expectedHeadSha: SHA });
+  assert.equal(result.outcome, 'success');
 });
