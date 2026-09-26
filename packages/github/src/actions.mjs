@@ -30,16 +30,35 @@ export async function dispatchWorkflow(client, token, repository, workflowId, re
   });
 }
 
-export async function fetchWorkflowRunEvidence(client, token, repository, runId, { signal } = {}) {
+export async function fetchWorkflowRunEvidence(client, token, repository, runId, { signal, expectedHeadSha } = {}) {
   const base = workflowRunBase(repository, runId);
-  const [{ data: workflowRun }, jobs] = await Promise.all([
-    client.request('GET', base, { token, signal }),
-    client.paginate(`${base}/jobs?filter=latest&per_page=100`, {
-      token,
-      signal,
-      map: (data) => data?.jobs,
-    }),
-  ]);
+  if (expectedHeadSha !== undefined && !/^[a-f0-9]{40}$/.test(expectedHeadSha)) {
+    throw new TypeError('Expected head SHA must be a full lowercase Git commit');
+  }
+  const { data: workflowRun } = await client.request('GET', base, { token, signal });
+  if (workflowRun?.id !== parseRunId(runId)
+      || !Number.isSafeInteger(workflowRun.run_attempt) || workflowRun.run_attempt < 1
+      || !/^[a-f0-9]{40}$/.test(workflowRun.head_sha ?? '')
+      || workflowRun.repository?.full_name?.toLowerCase() !== repository.toLowerCase()) {
+    throw new Error('Workflow run identity is missing or inconsistent');
+  }
+  if (expectedHeadSha !== undefined && workflowRun.head_sha !== expectedHeadSha) {
+    throw new Error('Workflow run does not match the expected candidate head');
+  }
+  // Pin jobs to the observed attempt: a concurrent rerun must not substitute
+  // its jobs underneath the already-fetched parent conclusion.
+  const jobs = await client.paginate(`${base}/attempts/${workflowRun.run_attempt}/jobs?per_page=100`, {
+    token,
+    signal,
+    requireComplete: true,
+    map: (data) => data?.jobs,
+  });
+  if (jobs.some((job) => job.run_id !== workflowRun.id
+      || job.run_attempt !== workflowRun.run_attempt || job.head_sha !== workflowRun.head_sha)
+      || new Set(jobs.map((job) => job.id)).size !== jobs.length
+      || jobs.some((job) => !Number.isSafeInteger(job.id) || job.id < 1)) {
+    throw new Error('Workflow jobs do not uniquely identify the observed run attempt and head');
+  }
   return Object.freeze({
     workflow_run: workflowRun,
     jobs: Object.freeze([...jobs]),
