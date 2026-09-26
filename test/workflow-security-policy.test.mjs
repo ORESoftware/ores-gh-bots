@@ -226,3 +226,17 @@ test('adjacent shell steps are each inspected after a block boundary', () => {
 test('non-shell steps and commented run keys do not create shell bodies', () => {
   assert.deepEqual(shellBodies('steps:\n  # - run: ignored\n  - uses: ./action\n'), []);
 });
+
+test('review and fleet-plan jobs build only the approved native dependency before invoking it', async () => {
+  for (const name of ['pr-review.yml', 'review-dispatch.yml', 'fleet-plan.yml']) {
+    const source = await readFile(new URL(name, WORKFLOW_DIRECTORY), 'utf8');
+    const commands = shellBodies(source);
+    const install = commands.findIndex((command) => command.trim() === 'npm ci --ignore-scripts');
+    const build = commands.findIndex((command) => command.trim() === 'npm run build:flags2env');
+    const consumer = commands.findIndex((command) => /npm run check|node apps\//u.test(command));
+    assert.ok(install >= 0 && build > install && consumer > build,
+      `${name} must install without lifecycle scripts, build flags2env, then run consumers`);
+    assert.ok(commands.every((command) => !/npm (?:install|rebuild)\b/u.test(command)),
+      `${name} must not enable arbitrary dependency lifecycle scripts`);
+  }
+});
