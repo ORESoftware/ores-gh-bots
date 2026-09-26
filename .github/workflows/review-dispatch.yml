@@ -58,6 +58,8 @@ jobs:
           cache: npm
       - name: Install exact lockfile
         run: npm ci --ignore-scripts
+      - name: Build the reviewed flags2env native boundary
+        run: npm run build:flags2env
       - name: Validate trusted reviewer source
         run: npm run check
       - name: Review exact pull-request head
