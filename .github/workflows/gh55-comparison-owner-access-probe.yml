@@ -4,13 +4,29 @@ on:
   pull_request:
     paths:
       - '.github/workflows/gh55-comparison-owner-access-probe.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/gh55-comparison-owner-access-probe.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Validate probe scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'GH-55 probe is read-only and mints repository-scoped contents:read installation tokens only.'
+
   probe:
+    if: github.event_name != 'pull_request'
     name: probe ${{ matrix.owner }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
