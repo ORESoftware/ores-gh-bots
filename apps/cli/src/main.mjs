@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   AppAuth,
+  collectFleetInventory,
   buildReviewerQueue,
   buildRulesetPayload,
   GitHubClient,
@@ -69,6 +70,7 @@ function usage() {
   console.error(`Usage:
   npm run cli -- manifest print ROLE
   npm run cli -- fleet discover [--limit N]
+  npm run cli -- fleet inventory
   npm run cli -- rulesets plan|apply [--repository OWNER/REPO] [--enforcement disabled|evaluate|active] [--branch-mode all|protected] [--limit N]
   npm run cli -- canary verify --evidence PATH [--expected-digest SHA256]
   npm run cli -- reviewer plan [--reviewer LOGIN] [--limit N] [--hints PATH]
@@ -99,6 +101,18 @@ if (group === 'manifest' && action === 'print') {
   ]);
   if (!allowed.has(role)) throw new Error(`Unknown manifest role: ${role}`);
   console.log(await readFile(resolve(root, `github-apps/${role}.manifest.json`), 'utf8'));
+} else if (group === 'fleet' && action === 'inventory') {
+  validateRuntimeConfig(config, { webhook: false, providers: false });
+  const client = new GitHubClient({ apiBaseUrl: config.github.apiBaseUrl, apiVersion: config.github.apiVersion });
+  const auth = new AppAuth({ client, apps: config.apps, logger });
+  const inventory = await collectFleetInventory({ client, auth,
+    ownerIsAllowed: (owner) => ownerIsAllowed(config, owner),
+    expectedOwners: config.github.ownerAllowlist,
+  });
+  console.log(JSON.stringify(inventory, null, 2));
+  if (!inventory.enumeration_complete) {
+    process.exitCode = 1;
+  }
 } else if (group === 'fleet' && action === 'discover') {
   validateRuntimeConfig(config, { webhook: false, providers: false });
   const client = new GitHubClient({ apiBaseUrl: config.github.apiBaseUrl, apiVersion: config.github.apiVersion });
