@@ -100,7 +100,10 @@ export class GitHubClient {
     }
   }
 
-  async paginate(path, { token, map = (value) => value, maxPages = 100, signal } = {}) {
+  async paginate(path, { token, map = (value) => value, maxPages = 100, signal, requireComplete = false } = {}) {
+    if (!Number.isSafeInteger(maxPages) || maxPages < 1) {
+      throw new TypeError('Pagination maxPages must be a positive safe integer');
+    }
     const results = [];
     let next = path;
     for (let page = 0; next && page < maxPages; page += 1) {
@@ -109,6 +112,9 @@ export class GitHubClient {
       if (!Array.isArray(values)) throw new Error(`Pagination mapper did not return an array for ${next}`);
       results.push(...values);
       next = linkNext(response.headers.get('link'));
+    }
+    if (requireComplete && next) {
+      throw new Error('Pagination limit reached before all evidence was collected');
     }
     return results;
   }
