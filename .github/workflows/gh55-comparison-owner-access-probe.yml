@@ -1,0 +1,60 @@
+name: GH-55 comparison owner access probe
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/gh55-comparison-owner-access-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe ${{ matrix.owner }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - owner: ORESoftware
+            repository: ores-comparisons
+          - owner: beamscale
+            repository: bmscl-cli
+          - owner: scintilla-run
+            repository: scintilla-cli
+          - owner: ores-dummy-org-1
+            repository: .github
+          - owner: ores-dummy-org-2
+            repository: .github
+          - owner: ores-dummy-org-3
+            repository: .github
+          - owner: ores-dummy-org-4
+            repository: .github
+          - owner: ores-dummy-org-5
+            repository: .github
+          - owner: ores-dummy-org-6
+            repository: .github
+    steps:
+      - name: Mint least-privilege owner token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # pinned v2
+        with:
+          app-id: ${{ secrets.ACTIONS_APP_ID }}
+          private-key: ${{ secrets.ACTIONS_APP_PRIVATE_KEY }}
+          owner: ${{ matrix.owner }}
+          repositories: ${{ matrix.repository }}
+          permission-contents: read
+
+      - name: Prove exact repository read access
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_OWNER: ${{ matrix.owner }}
+          TARGET_REPOSITORY: ${{ matrix.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          full_name="$(gh api "repos/$TARGET_OWNER/$TARGET_REPOSITORY" --jq .full_name)"
+          test "$full_name" = "$TARGET_OWNER/$TARGET_REPOSITORY"
+          printf 'read access admitted: %s\n' "$full_name"
