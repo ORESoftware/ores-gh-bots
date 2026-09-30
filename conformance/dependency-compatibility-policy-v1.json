@@ -1,0 +1,33 @@
+{
+  "schema": "ores.gh-bots.dependency-compatibility/v1",
+  "cases": [
+    {
+      "id": "compat-repo-adds-runtime-dependency",
+      "repo_class": "compatibility",
+      "changed_paths": ["Cargo.toml"],
+      "added_dependencies": ["example-runtime"],
+      "expected": {"decision": "flag", "reason": "compatibility_repo_new_dependency"}
+    },
+    {
+      "id": "legacy-repo-adds-dev-dependency",
+      "repo_class": "legacy",
+      "changed_paths": ["package.json"],
+      "added_dependencies": ["example-test-tool"],
+      "expected": {"decision": "flag", "reason": "legacy_repo_new_dependency"}
+    },
+    {
+      "id": "standard-repo-updates-dependency",
+      "repo_class": "standard",
+      "changed_paths": ["Cargo.toml", "Cargo.lock"],
+      "added_dependencies": ["example-runtime"],
+      "expected": {"decision": "allow", "reason": "standard_repo"}
+    },
+    {
+      "id": "legacy-repo-docs-only",
+      "repo_class": "legacy",
+      "changed_paths": ["README.md"],
+      "added_dependencies": [],
+      "expected": {"decision": "allow", "reason": "no_dependency_change"}
+    }
+  ]
+}
