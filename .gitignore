@@ -1,4 +1,18 @@
 node_modules/
+coverage/
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+.env.*
+!.env.example
+env/dec/*
+!env/dec/.gitkeep
+result/
+.DS_Store
+
+# nightly reconciler / hygiene / typecheck artifacts
 dist/
 *.tsbuildinfo
 reconcile-report.json

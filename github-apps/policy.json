@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "centralRepository": "ORESoftware/ores-gh-bots",
+  "apps": {
+    "orchestrator": {
+      "manifest": "orchestrator.manifest.json",
+      "visibility": "public-unlisted",
+      "installationScope": "fleet",
+      "permissions": {
+        "checks": "read",
+        "issues": "read",
+        "metadata": "read",
+        "pull_requests": "write",
+        "statuses": "read"
+      },
+      "events": [
+        "check_run",
+        "installation",
+        "installation_repositories",
+        "issue_comment",
+        "pull_request"
+      ],
+      "secretEnv": [
+        "GITHUB_APP_ID",
+        "GITHUB_APP_PRIVATE_KEY",
+        "GITHUB_WEBHOOK_SECRET"
+      ]
+    },
+    "openai": {
+      "manifest": "openai-reviewer.manifest.json",
+      "visibility": "public-unlisted",
+      "installationScope": "fleet",
+      "permissions": {
+        "checks": "write",
+        "metadata": "read"
+      },
+      "events": [],
+      "secretEnv": [
+        "OPENAI_REVIEW_APP_ID",
+        "OPENAI_REVIEW_APP_PRIVATE_KEY"
+      ]
+    },
+    "claude": {
+      "manifest": "claude-reviewer.manifest.json",
+      "visibility": "public-unlisted",
+      "installationScope": "fleet",
+      "permissions": {
+        "checks": "write",
+        "metadata": "read"
+      },
+      "events": [],
+      "secretEnv": [
+        "CLAUDE_REVIEW_APP_ID",
+        "CLAUDE_REVIEW_APP_PRIVATE_KEY"
+      ]
+    },
+    "gate": {
+      "manifest": "gate-reviewer.manifest.json",
+      "visibility": "public-unlisted",
+      "installationScope": "fleet",
+      "permissions": {
+        "checks": "write",
+        "metadata": "read"
+      },
+      "events": [],
+      "secretEnv": [
+        "GATE_APP_ID",
+        "GATE_APP_PRIVATE_KEY"
+      ]
+    },
+    "actions": {
+      "manifest": "actions-dispatcher.manifest.json",
+      "visibility": "private",
+      "installationScope": "central-repository",
+      "permissions": {
+        "actions": "write",
+        "metadata": "read"
+      },
+      "events": [],
+      "secretEnv": [
+        "ACTIONS_APP_ID",
+        "ACTIONS_APP_PRIVATE_KEY"
+      ]
+    }
+  }
+}

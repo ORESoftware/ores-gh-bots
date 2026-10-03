@@ -2,6 +2,7 @@
 import { DEFAULT_OPTIONS, FLEET_ORGS, SCHEDULE_TIMEZONE, type ReconcileOptions } from './config.ts';
 import { GitHubClient } from './github.ts';
 import { reconcile, summarise } from './reconcile.ts';
+import { buildReportEnvelope } from './report-contract.ts';
 import { isScheduledHour, localHourIn } from './schedule.ts';
 import { log } from './log.ts';
 
@@ -65,7 +66,7 @@ Environment:
   LOG_LEVEL                 debug | info | warn | error (default info)
 
 Safety: dry run is the default. Nothing is merged unless --apply is passed AND
-the PR has been open at least 55 hours AND every gate passes at >=99.5%
+the PR has been open at least 55 hours AND every gate passes at more than 99.5%
 confidence. Conflicts are never auto-resolved — see docs/policy.md.`;
 
 async function main(): Promise<number> {
@@ -92,7 +93,8 @@ async function main(): Promise<number> {
 
   const gh = new GitHubClient(token);
   const report = await reconcile(gh, opts, now);
-  process.stdout.write(JSON.stringify({ report }, null, 2) + '\n');
+  const envelope = buildReportEnvelope(report);
+  process.stdout.write(JSON.stringify(envelope, null, 2) + '\n');
   process.stderr.write(summarise(report) + '\n');
   return report.outcomes.some((o) => o.action === 'failed') ? 1 : 0;
 }

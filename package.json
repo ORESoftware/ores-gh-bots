@@ -2,24 +2,35 @@
   "name": "@oresoftware/ores-gh-bots",
   "version": "0.1.0",
   "private": true,
-  "description": "GitHub automation bots for the ORESoftware fleet: nightly cross-org PR reconciliation, dependency-graph-driven PR updates, and readiness-gated auto-merge.",
   "type": "module",
+  "description": "Event-driven, dual-provider GitHub pull-request review gates for the ORES fleet, plus the nightly cross-org PR reconciler (dependency-graph-driven PR refresh, readiness-gated auto-merge) and fleet git hygiene.",
   "engines": {
-    "node": ">=22.6"
+    "node": ">=22.6.0"
   },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
+    "start": "node apps/orchestrator/src/main.mjs",
+    "worker": "node apps/orchestrator/src/main.mjs --worker-only",
+    "cli": "node apps/cli/src/main.mjs",
+    "review": "node apps/runner/src/main.mjs",
     "reconcile": "node --experimental-strip-types src/cli.ts",
-    "test": "node --experimental-strip-types --test test/*.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "hygiene": "node --experimental-strip-types src/hygiene-cli.ts",
+    "test": "npm run test:review && npm run test:nightly",
+    "test:review": "node --test --test-reporter=spec",
+    "test:nightly": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "npx --yes -p typescript@5 -p @types/node@22 tsc -p tsconfig.json --noEmit",
+    "lint": "node scripts/lint.mjs",
     "lint:ores": "if [ -f .ores-lint/lint.sh ]; then sh .ores-lint/lint.sh; else echo 'ores-lint not installed'; fi",
-    "prepublishOnly": "npm run lint:ores"
-  },
-  "devDependencies": {
-    "@types/node": "^22.10.2",
-    "typescript": "^5.7.2"
+    "check": "npm run lint && npm test",
+    "verify:repository": "node scripts/verify-repository.mjs",
+    "verify:github-apps": "node scripts/verify-github-apps.mjs",
+    "verify": "npm run verify:repository && npm run verify:github-apps"
   },
   "comments": {
-    "devDependencies": "Optional. Runtime and tests use only Node built-ins so the nightly job needs no install step; devDependencies exist purely for local `npm run typecheck`."
+    "typecheck": "The nightly reconciler and its tests use only Node built-ins, so there is no install step; `npm run typecheck` pulls typescript/@types/node through npx on demand so the workspace lockfile stays dependency-free (`npm ci --ignore-scripts` in CI)."
   },
   "oresLint": {
     "note": "Declared, not installed. ores-lint resolves these from a global install - see .ores-lint/README.md",
@@ -28,5 +39,6 @@
       "typescript-eslint": ">=8 (optional; without it .ts files are skipped)"
     },
     "install": "npm i -g eslint typescript-eslint"
-  }
+  },
+  "license": "MIT"
 }

@@ -1,0 +1,13 @@
+{
+  "enforcement": "evaluate",
+  "branch_mode": "all",
+  "required_checks": [
+    {"context": "ores-review/openai", "integration_id_env": "OPENAI_REVIEW_APP_ID"},
+    {"context": "ores-review/claude", "integration_id_env": "CLAUDE_REVIEW_APP_ID"},
+    {"context": "ores-review/gate", "integration_id_env": "GATE_APP_ID"}
+  ],
+  "require_pull_request": true,
+  "required_approving_review_count": 0,
+  "strict_required_status_checks_policy": true,
+  "do_not_enforce_on_create": true
+}

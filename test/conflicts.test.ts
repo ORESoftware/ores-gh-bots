@@ -43,7 +43,8 @@ describe('never pick a side', () => {
 });
 
 describe('conflict dossier', () => {
-  test('context depth stays inside the 3-10 commit window', () => {
+  test('context depth stays inside the configured policy window', () => {
+    assert.ok(CONFLICT_CONTEXT_COMMITS_MIN >= 15, 'my-ai/AGENTS.md requires at least 15 commits per side');
     const cases: Array<[number, number, number]> = [
       [0, 0, 0],
       [1, 0, 0],
@@ -88,6 +89,7 @@ describe('conflict dossier', () => {
     assert.match(md, /zed-pkg\/zed-cli/);
     assert.match(md, /#41/);
     assert.match(md, new RegExp(`last \\*\\*${d.contextCommits} commits\\*\\*`));
+    assert.ok(d.contextCommits >= 15);
     assert.ok(!/resolved automatically|auto-resolved/i.test(md));
   });
 

@@ -4,10 +4,11 @@ import { CONFLICT_CONTEXT_COMMITS_MAX, CONFLICT_CONTEXT_COMMITS_MIN } from './co
  * Conflict policy.
  *
  * The standing instruction across every org is: resolve conflicts semantically,
- * with full context, looking back 3-10 commits for intent — never hastily pick a
- * side. This module encodes that as a hard invariant rather than a convention:
- * the merge strategies that pick sides are rejected in code, and a conflicted PR
- * produces a dossier for a semantic resolver instead of a mechanical resolution.
+ * with full context and at least 15 relevant commits of history on both sides —
+ * never hastily pick a side. This module encodes that as a hard invariant rather
+ * than a convention: side-picking strategies are rejected in code, and a
+ * conflicted PR produces a dossier for a semantic resolver instead of a
+ * mechanical resolution.
  */
 
 /** Merge strategies that resolve a conflict by discarding one side wholesale. */
@@ -62,14 +63,16 @@ export interface ConflictDossier {
 
 /**
  * Scales history depth with how entangled the conflict looks: a single-file
- * conflict with a quiet graph needs the floor, a wide one with dependency
- * movement needs the ceiling.
+ * conflict with a quiet graph still gets the policy floor; a wide conflict with
+ * dependency movement gets the higher bounded context ceiling.
  */
 export function contextDepth(touchedFiles: number, disturbedRepos: number, relatedPulls: number): number {
-  const entanglement = touchedFiles / 10 + disturbedRepos / 2 + relatedPulls / 3;
+  // One touched file is the irreducible conflict case and therefore contributes
+  // no extra depth by itself. Additional touched files, dependency movement,
+  // and overlapping PRs increase the requested history monotonically.
+  const additionalTouchedFiles = Math.max(0, touchedFiles - 1);
+  const entanglement = additionalTouchedFiles / 10 + disturbedRepos / 2 + relatedPulls / 3;
   const span = CONFLICT_CONTEXT_COMMITS_MAX - CONFLICT_CONTEXT_COMMITS_MIN;
-  // floor, not round: a barely-entangled conflict should sit at the 3-commit
-  // floor rather than being rounded up into extra history nobody needs.
   const depth = CONFLICT_CONTEXT_COMMITS_MIN + Math.floor(Math.min(1, entanglement) * span);
   return Math.max(CONFLICT_CONTEXT_COMMITS_MIN, Math.min(CONFLICT_CONTEXT_COMMITS_MAX, depth));
 }

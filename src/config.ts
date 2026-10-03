@@ -5,7 +5,7 @@
  *   - runs nightly at 1am America/Chicago
  *   - walks every PR in every repo across every org
  *   - updates PRs from their base and from dependency/dependent movement
- *   - auto-merges only what is >= 99.5% likely ready
+ *   - auto-merges only what is more than 99.5% likely ready
  *   - auto-merged PRs must have been open at least 55 hours (hard requirement)
  */
 
@@ -19,16 +19,19 @@ export const SCHEDULE_HOUR = 1;
  */
 export const MIN_OPEN_HOURS = 55;
 
-/** Merge only at or above this readiness probability. */
+/**
+ * Exclusive merge-confidence boundary. DEN-3946 says "more than 99.5%", so a
+ * score of exactly 0.995 is intentionally not sufficient for unattended merge.
+ */
 export const MERGE_CONFIDENCE_THRESHOLD = 0.995;
 
 /**
- * How far back to read history when assembling context for a conflicted merge.
- * The instruction is to merge conceptually with maximum context rather than
- * picking a side, so the dossier carries real history, not just the hunks.
+ * Current ORESoftware/my-ai/AGENTS.md requires at least 15 relevant commits of
+ * history on both sides before a non-trivial conflict is resolved. We scale up
+ * for entangled conflicts, but never below that policy floor.
  */
-export const CONFLICT_CONTEXT_COMMITS_MIN = 3;
-export const CONFLICT_CONTEXT_COMMITS_MAX = 10;
+export const CONFLICT_CONTEXT_COMMITS_MIN = 15;
+export const CONFLICT_CONTEXT_COMMITS_MAX = 30;
 
 /** Orgs walked by the nightly pass. Extend as new orgs come online. */
 export const FLEET_ORGS: readonly string[] = [

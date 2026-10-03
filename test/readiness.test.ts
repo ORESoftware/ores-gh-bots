@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluate } from '../src/readiness.ts';
+import { confidenceClearsExclusiveThreshold, evaluate } from '../src/readiness.ts';
 import { MERGE_CONFIDENCE_THRESHOLD, MIN_OPEN_HOURS } from '../src/config.ts';
 import { NOW, approval, greenCheck, hoursAgo, pull } from './helpers.ts';
 
@@ -10,7 +10,7 @@ describe('readiness gates', () => {
   test('a fully clean, well-soaked PR is mergeable', () => {
     const r = evaluate({ pr: pull(), ...clean });
     assert.equal(r.blockedBy.length, 0, `unexpected blockers: ${r.blockedBy.join(',')}`);
-    assert.ok(r.confidence >= MERGE_CONFIDENCE_THRESHOLD);
+    assert.ok(r.confidence > MERGE_CONFIDENCE_THRESHOLD);
     assert.equal(r.recommendation, 'merge');
   });
 
@@ -24,6 +24,25 @@ describe('readiness gates', () => {
   test('soak gate passes exactly at the boundary', () => {
     const r = evaluate({ pr: pull({ created_at: hoursAgo(MIN_OPEN_HOURS) }), ...clean });
     assert.ok(!r.blockedBy.includes(`open>=${MIN_OPEN_HOURS}h`));
+  });
+
+  test('confidence threshold is exclusive, not inclusive', () => {
+    assert.equal(confidenceClearsExclusiveThreshold(MERGE_CONFIDENCE_THRESHOLD), false);
+    assert.equal(confidenceClearsExclusiveThreshold(MERGE_CONFIDENCE_THRESHOLD + Number.EPSILON), true);
+    assert.equal(confidenceClearsExclusiveThreshold(Number.NaN), false);
+    assert.equal(confidenceClearsExclusiveThreshold(Number.POSITIVE_INFINITY), false);
+  });
+
+  test('an author identity never counts as an independent approval', () => {
+    const r = evaluate({
+      pr: pull({ user: { login: 'author' } }),
+      reviews: [approval('author')],
+      checks: [greenCheck()],
+      now: NOW,
+      disturbedBy: [],
+    });
+    assert.equal(r.mergeable, false);
+    assert.equal(r.signals.reviewed, 0.9);
   });
 
   test('no amount of signal strength can buy past a gate', () => {
@@ -47,6 +66,15 @@ describe('readiness gates', () => {
     const r = evaluate({ pr: pull({ mergeable: false, mergeable_state: 'dirty' }), ...clean });
     assert.equal(r.recommendation, 'escalate');
     assert.match(r.reason, /never a side-pick/);
+  });
+
+  test('a conflicted draft is held rather than escalated', () => {
+    const r = evaluate({
+      pr: pull({ draft: true, mergeable: false, mergeable_state: 'dirty' }),
+      ...clean,
+    });
+    assert.equal(r.recommendation, 'hold');
+    assert.match(r.reason, /protected from automation by not-draft/);
   });
 
   test('changes-requested blocks even after a later approval by someone else', () => {
@@ -120,6 +148,15 @@ describe('readiness gates', () => {
       const r = evaluate({ pr: pull({ labels: [{ name }] }), ...clean });
       assert.ok(r.blockedBy.includes('no-hold-label'), `${name} should block`);
     }
+  });
+
+  test('a hold-labelled behind PR is held rather than updated', () => {
+    const r = evaluate({
+      pr: pull({ labels: [{ name: 'hold' }], mergeable_state: 'behind' }),
+      ...clean,
+    });
+    assert.equal(r.recommendation, 'hold');
+    assert.match(r.reason, /protected from automation by no-hold-label/);
   });
 
   test('draft PRs are never merged', () => {

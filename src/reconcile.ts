@@ -1,12 +1,11 @@
 import {
   EXCLUDED_REPOS,
-  MERGE_CONFIDENCE_THRESHOLD,
   MIN_OPEN_HOURS,
   type ReconcileOptions,
 } from './config.ts';
 import { GitHubClient, GitHubError, type PullRequest, type Repo } from './github.ts';
 import { buildGraph, disturbanceSet, parseGitmodules, parseZpkgToml, repoFromGitUrl, resolveZedDep, type DepEdge, type DepGraph } from './depgraph.ts';
-import { evaluate, type Readiness } from './readiness.ts';
+import { confidenceClearsExclusiveThreshold, evaluate, type Readiness } from './readiness.ts';
 import { buildDossier, overlappingPulls, renderDossier } from './conflicts.ts';
 import { log } from './log.ts';
 
@@ -136,13 +135,13 @@ export async function reconcilePull(
   try {
     switch (readiness.recommendation) {
       case 'merge': {
-        // Belt and braces: the soak gate is re-asserted at the point of action,
-        // not just at the point of scoring.
+        // Belt and braces: the soak and confidence gates are re-asserted at the
+        // point of action, not just at the point of scoring.
         if (ageHours < MIN_OPEN_HOURS) {
           return { ...base, action: 'held', reason: `soak gate: ${ageHours.toFixed(1)}h < ${MIN_OPEN_HOURS}h` };
         }
-        if (readiness.confidence < MERGE_CONFIDENCE_THRESHOLD) {
-          return { ...base, action: 'held', reason: 'confidence below threshold at action time' };
+        if (!confidenceClearsExclusiveThreshold(readiness.confidence)) {
+          return { ...base, action: 'held', reason: 'confidence not strictly above threshold at action time' };
         }
         if (ctx.dryRun) return { ...base, action: 'skipped', reason: `would merge — ${readiness.reason}` };
         await gh.merge(owner, repoName, pr.number, pr.head.sha);

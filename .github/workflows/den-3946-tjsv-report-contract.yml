@@ -1,0 +1,97 @@
+name: DEN-3946 TJSV report contract
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'contracts/den-3946-pr-reconcile/**'
+      - '.github/workflows/den-3946-tjsv-report-contract.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'contracts/den-3946-pr-reconcile/**'
+      - '.github/workflows/den-3946-tjsv-report-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: den-3946-tjsv-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact source head without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.16.0
+
+      - name: Run the reconciler test corpus
+        run: node --experimental-strip-types --test test/*.test.ts
+
+      - name: Check out immutable canonical TJSV
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/typespec-json-schema-validator
+          ref: 4a5d049218adc2740d4cf78f612caf7f38f6f64c
+          path: tmp/tjsv
+          persist-credentials: false
+
+      - name: Install TJSV from its committed dependency lock
+        run: npm ci --prefix tmp/tjsv --omit=dev
+
+      - name: Prove independent TypeSpec and JSON Schema report parity
+        run: |
+          mkdir -p tmp/den-3946/positive
+          node tmp/tjsv/bin/typespec-json-schema-validator.mjs check \
+            --typespec=contracts/den-3946-pr-reconcile/main.tsp \
+            --schema=contracts/den-3946-pr-reconcile/authored.schema.json \
+            --instances=contracts/den-3946-pr-reconcile/instances \
+            --report=tmp/den-3946/positive/report.json
+
+      - name: Prove authored-authority drift stops admission
+        run: |
+          mkdir -p tmp/den-3946/negative
+          cp contracts/den-3946-pr-reconcile/authored.schema.json tmp/den-3946/negative/mutated.schema.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const path = 'tmp/den-3946/negative/mutated.schema.json';
+          const schema = JSON.parse(fs.readFileSync(path, 'utf8'));
+          schema.$defs.PolicyEvidence.properties.generatedAuthority = { type: 'boolean' };
+          schema.$defs.PolicyEvidence.required.push('generatedAuthority');
+          fs.writeFileSync(path, `${JSON.stringify(schema, null, 2)}\n`);
+          NODE
+          set +e
+          node tmp/tjsv/bin/typespec-json-schema-validator.mjs check \
+            --typespec=contracts/den-3946-pr-reconcile/main.tsp \
+            --schema=tmp/den-3946/negative/mutated.schema.json \
+            --instances=contracts/den-3946-pr-reconcile/instances \
+            --report=tmp/den-3946/negative/report.json
+          status=$?
+          set -e
+          if [ "$status" -ne 2 ]; then
+            echo "expected TJSV stopped_for_evaluation exit 2 for intentional authority drift, got $status" >&2
+            exit 1
+          fi
+
+      - name: Retain exact-run contract evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: den-3946-tjsv-${{ github.sha }}
+          path: tmp/den-3946/
+          if-no-files-found: error
+          retention-days: 14
