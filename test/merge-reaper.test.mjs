@@ -15,6 +15,7 @@ const policy = validateMergeReaperPolicy({
   maxMerges: 3,
   maxRepositories: 100,
   maxPullRequestsPerRepository: 100,
+  requireHumanApproval: false,
   repositoryDependencies: {},
 });
 
@@ -223,7 +224,7 @@ test('latest human approval can satisfy an approval policy while stale requested
     policy: humanPolicy,
     reviews: [
       { id: 1, state: 'CHANGES_REQUESTED', submitted_at: '2026-09-01T00:00:00Z', user: { login: 'human', type: 'User' } },
-      { id: 2, state: 'APPROVED', submitted_at: '2026-09-02T00:00:00Z', user: { login: 'human', type: 'User' } },
+      { id: 2, state: 'APPROVED', submitted_at: '2026-09-02T00:00:00Z', commit_id: 'a'.repeat(40), user: { login: 'human', type: 'User' } },
       { id: 3, state: 'COMMENTED', submitted_at: '2026-09-02T00:00:00Z', user: { login: '', type: 'User' } },
     ],
     dependencyStates: { 'other/repo#1': 'merged', 'other/repo#2': 'eligible-earlier' },
@@ -323,4 +324,46 @@ test('canonical dependency parser rejects ambiguous multi-target reaper directiv
     () => parseMergeReaperDependencies('Depends-On: other/lib#1, #2', { owner: 'Org', repo: 'Repo' }),
     /Invalid PR dependency declaration/u,
   );
+});
+
+
+test('secure default requires an independent human review', () => {
+  assert.equal(validateMergeReaperPolicy().requireHumanApproval, true);
+  const withoutApproval = evaluate({ policy: validateMergeReaperPolicy({ minimumAgeHours: 55 }) });
+  assert.equal(withoutApproval.eligible, false);
+  assert.ok(withoutApproval.reasons.includes('missing-human-approval'));
+});
+
+test('human approval must bind to the exact current head', () => {
+  const strict = validateMergeReaperPolicy({ ...policy, requireHumanApproval: true });
+  const stale = evaluate({
+    policy: strict,
+    reviews: [{ id: 5, state: 'APPROVED', submitted_at: '2026-09-02T19:00:00Z',
+      commit_id: 'b'.repeat(40), user: { login: 'reviewer', type: 'User' } }],
+  });
+  assert.ok(stale.reasons.includes('missing-human-approval'));
+  const current = evaluate({
+    policy: strict,
+    reviews: [{ id: 6, state: 'APPROVED', submitted_at: '2026-09-02T19:00:00Z',
+      commit_id: 'a'.repeat(40), user: { login: 'reviewer', type: 'User' } }],
+  });
+  assert.equal(current.eligible, true);
+});
+
+test('skipped and neutral check runs never satisfy passing CI', () => {
+  for (const conclusion of ['skipped', 'neutral', null]) {
+    const result = evaluate({ ciStates: [{
+      context: 'ci/verify', source: 'check_run', state: 'success',
+      rawStatus: 'completed', rawConclusion: conclusion,
+    }] });
+    assert.equal(result.eligible, false, String(conclusion));
+    assert.ok(result.reasons.some((reason) => reason.startsWith('ci-check-not-passing:ci/verify:')));
+  }
+});
+
+test('explicit CI-only / do-not-merge PR titles are unconditionally denied', () => {
+  for (const title of ['[CI ONLY] capacity probe', '[TEST-ONLY] mirror', 'SECURITY TEST — DO NOT MERGE']) {
+    const result = evaluate({ pullRequest: pullRequest({ title }) });
+    assert.ok(result.reasons.includes('explicit-non-merge-title'), title);
+  }
 });

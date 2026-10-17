@@ -28,7 +28,7 @@
     "no-automerge",
     "security-review"
   ],
-  "requireHumanApproval": false,
+  "requireHumanApproval": true,
   "ignoredCiContexts": [],
   "repositoryDependencies": {
     "opto-sync/opto-sync-monorepo": [

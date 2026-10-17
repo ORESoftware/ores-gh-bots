@@ -20,7 +20,7 @@ export const DEFAULT_REAPER_POLICY = Object.freeze({
     'no-automerge',
     'security-review',
   ]),
-  requireHumanApproval: false,
+  requireHumanApproval: true,
   ignoredCiContexts: Object.freeze([]),
   repositoryDependencies: Object.freeze({}),
 });
@@ -183,6 +183,7 @@ function latestReviewStates(reviews) {
         id: Number(review.id) || 0,
         state: String(review.state ?? '').toUpperCase(),
         submittedAt,
+        commitId: String(review?.commit_id ?? '').toLowerCase(),
         type: String(review?.user?.type ?? ''),
       });
     }
@@ -229,6 +230,10 @@ export function evaluateMergeCandidate({
 
   if (pullRequest?.state !== 'open') reasons.push('pull-request-not-open');
   if (pullRequest?.draft) reasons.push('draft-pull-request');
+  // These PRs are deliberately transient CI probes and must never be promoted.
+  if (/\b(?:do[\s-]+not[\s-]+merge|(?:ci|test)[\s-]+only)\b/iu.test(String(pullRequest?.title ?? ''))) {
+    reasons.push('explicit-non-merge-title');
+  }
   if (pullRequest?.auto_merge) reasons.push('native-auto-merge-already-enabled');
 
   const age = ageHours(pullRequest?.created_at, now);
@@ -276,12 +281,22 @@ export function evaluateMergeCandidate({
   if (effectiveCiStates.length === 0) reasons.push('no-independent-ci-contexts');
   for (const ci of effectiveCiStates) {
     if (ci.state !== 'success') reasons.push(`ci-not-success:${ci.context}:${ci.state}`);
+    // General-purpose check snapshots may normalize skipped/neutral conclusions
+    // to success. Neither is evidence that the CI workload actually passed.
+    if (ci.source === 'check_run' && (ci.rawStatus !== 'completed' || ci.rawConclusion !== 'success')) {
+      reasons.push(`ci-check-not-passing:${ci.context}:${ci.rawConclusion ?? ci.rawStatus ?? 'missing'}`);
+    }
   }
 
   const reviewStates = latestReviewStates(reviews);
   if (reviewStates.some((review) => review.state === 'CHANGES_REQUESTED')) reasons.push('changes-requested');
   if (normalizedPolicy.requireHumanApproval
-    && !reviewStates.some((review) => review.state === 'APPROVED' && review.type === 'User')) {
+    && !reviewStates.some((review) => (
+      review.state === 'APPROVED'
+      && review.type === 'User'
+      && review.submittedAt > 0
+      && review.commitId === String(pullRequest?.head?.sha ?? '').toLowerCase()
+    ))) {
     reasons.push('missing-human-approval');
   }
 
