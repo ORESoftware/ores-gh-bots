@@ -63,6 +63,7 @@ export async function countUnresolvedReviewThreads(client, token, owner, repo, p
 
 export async function mergePullRequestExact(client, token, owner, repo, prNumber, {
   expectedHeadSha,
+  expectedBaseSha,
   method = 'squash',
   commitTitle,
   commitMessage,
@@ -71,12 +72,16 @@ export async function mergePullRequestExact(client, token, owner, repo, prNumber
   if (!/^[0-9a-f]{40,64}$/u.test(String(expectedHeadSha ?? ''))) {
     throw new Error('expectedHeadSha must be a 40- or 64-character lowercase hexadecimal SHA');
   }
+  if (!/^[0-9a-f]{40,64}$/u.test(String(expectedBaseSha ?? ''))) {
+    throw new Error('expectedBaseSha must be a 40- or 64-character lowercase hexadecimal SHA');
+  }
   if (!['merge', 'squash', 'rebase'].includes(method)) throw new Error(`Unsupported merge method: ${method}`);
 
   const current = await getPullRequest(client, token, target.owner, target.repo, target.prNumber);
   if (current.state !== 'open') throw new Error('Pull request is no longer open');
   if (current.draft) throw new Error('Pull request became a draft');
   if (current.head?.sha !== expectedHeadSha) throw new Error('Pull request head changed before merge');
+  if (current.base?.sha !== expectedBaseSha) throw new Error('Pull request base changed before merge');
   if (current.mergeable !== true || current.mergeable_state !== 'clean') {
     throw new Error(`Pull request is not cleanly mergeable (${current.mergeable_state ?? 'unknown'})`);
   }
