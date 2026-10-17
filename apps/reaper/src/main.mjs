@@ -116,7 +116,9 @@ function trustedPlaceholderSnapshot(pullRequest, gateAppId, gateExternalId, poli
       ? [{
         id: 1,
         state: 'APPROVED',
-        submitted_at: '1970-01-01T00:00:00.000Z',
+        // Static screening only: actual exact-head reviews are fetched before eligibility.
+        submitted_at: pullRequest.created_at,
+        commit_id: pullRequest.head?.sha,
         user: { login: 'merge-reaper-static-preflight', type: 'User' },
       }]
       : [],
