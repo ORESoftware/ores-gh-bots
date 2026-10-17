@@ -393,6 +393,13 @@ async function main() {
       const repository = repositoryByName.get(candidate.repository);
       try {
         const fresh = await freshInspection({ candidate, repository, client, auth, policy, gateAppId });
+        // A passing check on the PR head is insufficient if the target branch
+        // advanced since selection; require a new plan against the new base.
+        if (!candidate.pullRequest?.base?.sha || fresh.pullRequest?.base?.sha !== candidate.pullRequest.base.sha
+          || fresh.headSha !== candidate.headSha) {
+          mergeResults.push({ key: candidate.key, merged: false, reason: 'head-or-base-moved-since-selection' });
+          continue;
+        }
         const dependencyCache = new Map();
         const dependencyStates = await resolveFreshDependencyStates({
           freshDependencies: fresh.dependencies,
@@ -422,6 +429,7 @@ async function main() {
         const mergeToken = await auth.installationToken('reaper', repository.installationId);
         const result = await mergePullRequestExact(client, mergeToken, repository.owner, repository.repo, candidate.number, {
           expectedHeadSha: fresh.headSha,
+          expectedBaseSha: fresh.pullRequest.base.sha,
           method: policy.mergeMethod,
           commitTitle: `${fresh.title} (#${fresh.number})`,
           commitMessage: `Merged by the ORES dependency-aware reaper after ${policy.minimumAgeHours}h, exact-SHA ORES gate validation, independent CI success, review-thread resolution, and explicit automerge opt-in.`,
