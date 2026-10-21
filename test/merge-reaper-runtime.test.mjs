@@ -117,6 +117,8 @@ test('runtime keeps exact-head merge and bounded-effect invariants visible at th
   assert.match(source, /Merge reaper and gate GitHub App identities must be distinct/u);
   assert.match(source, /\^MERGE-/u);
   assert.match(source, /policy\.requireHumanApproval/u);
+  assert.match(source, /action === 'apply' && !policy\.requireHumanApproval/u);
+  assert.match(source, /Apply requires independent human approval|Merge apply requires independent human approval/u);
   assert.match(source, /auth\.installationToken\('reaper', repository\.installationId\)/u);
   assert.doesNotMatch(source, /repository\.token/u);
 });
