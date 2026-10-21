@@ -22,6 +22,7 @@ const policy = validateMergeReaperPolicy({
 function pullRequest(overrides = {}) {
   return {
     number: 7,
+    user: { login: 'author' },
     state: 'open',
     draft: false,
     auto_merge: null,
