@@ -291,14 +291,17 @@ export function evaluateMergeCandidate({
 
   const reviewStates = latestReviewStates(reviews);
   if (reviewStates.some((review) => review.state === 'CHANGES_REQUESTED')) reasons.push('changes-requested');
+  // A reviewer cannot be independent when GitHub did not supply a usable PR author.
+  // Do not turn missing identity into an empty-string comparison that accepts anyone.
+  const prAuthorLogin = String(pullRequest?.user?.login ?? '').trim().toLowerCase();
   if (normalizedPolicy.requireHumanApproval
-    && !reviewStates.some((review) => (
+    && (!prAuthorLogin || !reviewStates.some((review) => (
       review.state === 'APPROVED'
       && review.type === 'User'
-      && review.login !== String(pullRequest?.user?.login ?? '').trim().toLowerCase()
+      && review.login !== prAuthorLogin
       && review.submittedAt > 0
       && review.commitId === String(pullRequest?.head?.sha ?? '').toLowerCase()
-    ))) {
+    )))) {
     reasons.push('missing-human-approval');
   }
 
