@@ -386,6 +386,8 @@ test('temporary cross-org CI mirrors are never eligible for a production merge',
     'ci/exact/llvm-actor',
     'ci-source-free/probe',
     'carrier/orestra-private-tree',
+    `ci/oreslang-${'b'.repeat(40)}`,
+    `ci/authorized-${'a'.repeat(40)}`,
   ]) {
     const result = evaluate({
       pullRequest: pullRequest({
@@ -404,6 +406,26 @@ test('temporary cross-org CI mirrors are never eligible for a production merge',
     }),
   });
   assert.equal(ordinary.eligible, true);
+});
+
+test('temporary carrier and do-not-merge labels cannot be weakened by a policy override', () => {
+  const relaxed = validateMergeReaperPolicy({
+    ...policy,
+    denyLabels: [],
+    requireOptInLabel: false,
+  });
+  for (const label of ['do-not-merge', 'ci-only', 'test-only', 'test-carrier', 'private-mirror']) {
+    const result = evaluate({
+      policy: relaxed,
+      pullRequest: pullRequest({
+        title: 'Ordinary feature',
+        head: { sha: 'a'.repeat(40), ref: 'fix/normal' },
+        labels: [{ name: label }],
+      }),
+    });
+    assert.equal(result.eligible, false, label);
+    assert.ok(result.reasons.some(reason => reason.startsWith('explicit-non-merge-label:')), label);
+  }
 });
 
 test('independent reviewer must not be the PR author even with an exact-head approval', () => {
