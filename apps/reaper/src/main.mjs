@@ -327,6 +327,11 @@ async function main() {
   if (action === 'apply' && !policy.requireOptInLabel) {
     throw new Error('Merge apply requires an explicit per-PR opt-in label; requireOptInLabel=false is plan-only');
   }
+  // An apply policy must not silently hide failing CI contexts from the
+  // independent-check gate. Ignore lists are diagnostic only in plan mode.
+  if (action === 'apply' && policy.ignoredCiContexts.length > 0) {
+    throw new Error('Merge apply cannot ignore CI contexts; ignoredCiContexts is plan-only');
+  }
   const logger = createLogger({ service: 'ores-gh-bots-reaper' });
   const client = new GitHubClient({ apiBaseUrl: config.github.apiBaseUrl, apiVersion: config.github.apiVersion });
   const auth = new AppAuth({ client, apps: { ...config.apps, reaper }, logger });
