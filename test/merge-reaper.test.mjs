@@ -395,3 +395,22 @@ test('independent reviewer must not be the PR author even with an exact-head app
   assert.equal(independent.eligible, true);
   assert.ok(!independent.reasons.includes('missing-human-approval'));
 });
+
+test('missing author metadata cannot satisfy an exact-head human review', () => {
+  const strict = validateMergeReaperPolicy({ ...policy, requireHumanApproval: true });
+  const review = {
+    id: 994, state: 'APPROVED', submitted_at: '2026-09-02T19:00:00Z',
+    commit_id: 'a'.repeat(40), user: { login: 'reviewer', type: 'User' },
+  };
+  for (const user of [null, {}, { login: '' }, { login: '  ' }]) {
+    const result = evaluate({ policy: strict, pullRequest: pullRequest({ user }), reviews: [review] });
+    assert.equal(result.eligible, false);
+    assert.ok(result.reasons.includes('missing-human-approval'));
+  }
+  const valid = evaluate({
+    policy: strict,
+    pullRequest: pullRequest({ user: { login: 'the-author' } }),
+    reviews: [review],
+  });
+  assert.equal(valid.eligible, true);
+});
