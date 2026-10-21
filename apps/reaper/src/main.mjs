@@ -322,6 +322,11 @@ async function main() {
   if (action === 'apply' && !policy.requireHumanApproval) {
     throw new Error('Merge apply requires independent human approval; requireHumanApproval=false is plan-only');
   }
+  // Merge opt-in is mandatory in apply mode, even when a custom policy file
+  // disables the default. A batch request is not approval for every open PR.
+  if (action === 'apply' && !policy.requireOptInLabel) {
+    throw new Error('Merge apply requires an explicit per-PR opt-in label; requireOptInLabel=false is plan-only');
+  }
   const logger = createLogger({ service: 'ores-gh-bots-reaper' });
   const client = new GitHubClient({ apiBaseUrl: config.github.apiBaseUrl, apiVersion: config.github.apiVersion });
   const auth = new AppAuth({ client, apps: { ...config.apps, reaper }, logger });
