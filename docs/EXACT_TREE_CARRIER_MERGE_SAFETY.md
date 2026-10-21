@@ -25,6 +25,29 @@ check-run/status published through approved source-side governance.
    source checks, review threads, dependencies and explicit merge opt-in
    immediately before a protected GitHub merge operation.
 
+## Unsafe workflows on mirrored branch pushes
+
+GitHub evaluates `push` workflows from a pushed branch's own tree. Therefore
+copying a source PR's exact tree into a funded repository is **not inherently
+safe**: untrusted source workflows may run in the carrier's identity, access
+any carrier secrets made available to them, or consume unexpected runner
+minutes. Matching tree SHAs proves contents, not permission safety.
+
+Before publishing an exact-tree branch, audit **every** source-owned
+`.github/workflows/**` file and the carrier's Actions configuration.
+Reject any unreviewed workflow that could execute on the mirror ref, any
+privileged `pull_request_target` use, broad write permissions, secret
+references, or unapproved third-party actions. The preferred design is a
+trusted carrier-owned workflow on a protected reference that checks out the
+previously verified exact source tree by immutable Git object identity. Do
+not use a full-tree mirror's own workflows as trusted receipt authorities.
+
+A carrier that has demonstrated a past successful run is not proof that
+new runs have an available paid-minutes budget. Require an actually started
+test job with executed steps and a terminal success conclusion. If a source
+file cannot be copied or its SHA does not match, abort the entire mirror;
+a partial set of transferred blobs is **not** an exact-tree mirror.
+
 ## Reaper policy
 
 The merge reaper rejects PRs whose titles identify CI-only work, exact-tree
