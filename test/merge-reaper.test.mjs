@@ -367,3 +367,30 @@ test('explicit CI-only / do-not-merge PR titles are unconditionally denied', () 
     assert.ok(result.reasons.includes('explicit-non-merge-title'), title);
   }
 });
+
+test('independent reviewer must not be the PR author even with an exact-head approval', () => {
+  const strict = validateMergeReaperPolicy({ ...policy, requireHumanApproval: true });
+  const author = 'self-reviewer';
+  const approval = {
+    id: 991,
+    state: 'APPROVED',
+    submitted_at: '2026-09-02T19:00:00Z',
+    commit_id: 'a'.repeat(40),
+    user: { login: author, type: 'User' },
+  };
+  const own = evaluate({
+    policy: strict,
+    pullRequest: pullRequest({ user: { login: author } }),
+    reviews: [approval],
+  });
+  assert.equal(own.eligible, false);
+  assert.ok(own.reasons.includes('missing-human-approval'));
+
+  const independent = evaluate({
+    policy: strict,
+    pullRequest: pullRequest({ user: { login: 'different-author' } }),
+    reviews: [approval],
+  });
+  assert.equal(independent.eligible, true);
+  assert.ok(!independent.reasons.includes('missing-human-approval'));
+});
