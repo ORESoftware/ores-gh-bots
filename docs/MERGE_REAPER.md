@@ -34,7 +34,7 @@ node apps/reaper/src/main.mjs reaper plan
 node apps/reaper/src/main.mjs reaper apply --confirm MERGE-<ticket>
 ```
 
-`plan` never writes to GitHub. `apply` requires a bounded `MERGE-*` acknowledgement in addition to the policy gates. The scheduled workflow supplies its own fixed acknowledgement only after its local-time admission gate and repository verification succeed.
+`plan` never writes to GitHub. `apply` requires a bounded `MERGE-*` acknowledgement in addition to the policy gates. In apply mode, **independent exact-head human approval, explicit PR opt-in, and every non-gate CI context are mandatory**: `requireHumanApproval=false`, `requireOptInLabel=false`, or a nonempty `ignoredCiContexts` list is rejected even when requested by a policy override. Plan mode may simulate alternative policies, but it never authorizes a merge. The scheduled workflow supplies its own fixed acknowledgement only after its local-time admission gate and repository verification succeed.
 
 ## Reports
 
