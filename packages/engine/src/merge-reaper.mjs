@@ -231,9 +231,16 @@ export function evaluateMergeCandidate({
 
   if (pullRequest?.state !== 'open') reasons.push('pull-request-not-open');
   if (pullRequest?.draft) reasons.push('draft-pull-request');
-  // These PRs are deliberately transient CI probes and must never be promoted.
-  if (/\b(?:do[\s-]+not[\s-]+merge|(?:ci|test)[\s-]+only)\b/iu.test(String(pullRequest?.title ?? ''))) {
+  // CI mirrors, exact-tree carriers, and explicitly non-mergeable probes
+  // are execution evidence, not deployable source PRs. Deny them regardless
+  // of opt-in labels or a passing status supplied by the test organization.
+  const title = String(pullRequest?.title ?? '');
+  if (/\b(?:do[\s-]+not[\s-]+merge|(?:ci|test)[\s-]+only|ci[\s-]+mirror|exact[\s-]+tree[\s-]+carrier)\b/iu.test(title)) {
     reasons.push('explicit-non-merge-title');
+  }
+  const headRef = String(pullRequest?.head?.ref ?? '');
+  if (/^(?:ci[-_/]mirror|ci[-_/]exact|ci[-_/]source[-_/]free|carrier)(?:[\/_-]|$)/iu.test(headRef)) {
+    reasons.push('explicit-non-merge-carrier-branch');
   }
   if (pullRequest?.auto_merge) reasons.push('native-auto-merge-already-enabled');
 
