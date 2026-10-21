@@ -369,6 +369,43 @@ test('explicit CI-only / do-not-merge PR titles are unconditionally denied', () 
   }
 });
 
+test('temporary cross-org CI mirrors are never eligible for a production merge', () => {
+  for (const title of [
+    'CI mirror: Oreslang #1313 async diagnostics',
+    'Exact-tree carrier: actor branch',
+    '[CI ONLY] private-source replay',
+    'TEST-ONLY: runner allocation',
+  ]) {
+    const result = evaluate({ pullRequest: pullRequest({ title }) });
+    assert.equal(result.eligible, false, title);
+    assert.ok(result.reasons.includes('explicit-non-merge-title'), title);
+  }
+
+  for (const ref of [
+    'ci-mirror/actor-source-exact-tree',
+    'ci/exact/llvm-actor',
+    'ci-source-free/probe',
+    'carrier/orestra-private-tree',
+  ]) {
+    const result = evaluate({
+      pullRequest: pullRequest({
+        title: 'Updated scheduler',
+        head: { sha: 'a'.repeat(40), ref },
+      }),
+    });
+    assert.equal(result.eligible, false, ref);
+    assert.ok(result.reasons.includes('explicit-non-merge-carrier-branch'), ref);
+  }
+
+  const ordinary = evaluate({
+    pullRequest: pullRequest({
+      title: 'fix: scheduler admission',
+      head: { sha: 'a'.repeat(40), ref: 'fix/scheduler-admission' },
+    }),
+  });
+  assert.equal(ordinary.eligible, true);
+});
+
 test('independent reviewer must not be the PR author even with an exact-head approval', () => {
   const strict = validateMergeReaperPolicy({ ...policy, requireHumanApproval: true });
   const author = 'self-reviewer';
