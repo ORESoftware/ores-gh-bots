@@ -239,7 +239,9 @@ export function evaluateMergeCandidate({
     reasons.push('explicit-non-merge-title');
   }
   const headRef = String(pullRequest?.head?.ref ?? '');
-  if (/^(?:ci[-_/]mirror|ci[-_/]exact|ci[-_/]source[-_/]free|carrier)(?:[\/_-]|$)/iu.test(headRef)) {
+  if (/^(?:ci[-_/]mirror|ci[-_/]exact|ci[-_/]source[-_/]free|carrier)(?:[\/_-]|$)/iu.test(headRef)
+    || /^ci\/oreslang-[0-9a-f]{40}$/iu.test(headRef)
+    || /^ci\/authorized-[0-9a-f]{40}$/iu.test(headRef)) {
     reasons.push('explicit-non-merge-carrier-branch');
   }
   if (pullRequest?.auto_merge) reasons.push('native-auto-merge-already-enabled');
@@ -256,6 +258,10 @@ export function evaluateMergeCandidate({
   const labels = labelNames(pullRequest);
   const denied = normalizedPolicy.denyLabels.filter((label) => labels.includes(label));
   if (denied.length > 0) reasons.push(`denied-label:${denied.join(',')}`);
+  // Explicit non-merge and temporary-carrier labels are absolute denials:
+  // no caller-supplied policy can remove them from the deny list.
+  const nonMergeLabels = labels.filter((label) => /^(?:do[-_ ]?not[-_ ]?merge|ci[-_ ]?only|test[-_ ]?only|test[-_ ]?carrier|private[-_ ]?mirror)$/iu.test(label));
+  if (nonMergeLabels.length > 0) reasons.push(`explicit-non-merge-label:${nonMergeLabels.join(',')}`);
   if (normalizedPolicy.requireOptInLabel && !normalizedPolicy.optInLabels.some((label) => labels.includes(label))) {
     reasons.push('missing-automerge-opt-in-label');
   }
