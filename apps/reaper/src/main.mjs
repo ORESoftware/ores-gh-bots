@@ -317,6 +317,11 @@ async function main() {
     maxRepositories: cli.values.MERGE_REAPER_MAX_REPOSITORIES,
     maxPullRequestsPerRepository: cli.values.MERGE_REAPER_MAX_PRS_PER_REPOSITORY,
   });
+  // Planning may simulate relaxed policies; live merges may never waive
+  // independent human review, even through a caller-controlled policy file.
+  if (action === 'apply' && !policy.requireHumanApproval) {
+    throw new Error('Merge apply requires independent human approval; requireHumanApproval=false is plan-only');
+  }
   const logger = createLogger({ service: 'ores-gh-bots-reaper' });
   const client = new GitHubClient({ apiBaseUrl: config.github.apiBaseUrl, apiVersion: config.github.apiVersion });
   const auth = new AppAuth({ client, apps: { ...config.apps, reaper }, logger });
