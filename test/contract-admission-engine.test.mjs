@@ -91,7 +91,7 @@ function fakeClient(fixture, {
         return { data: pullRequest(sha, { headRepository }) };
       }
       if (method === 'GET' && path.includes('check_name=ores-review%2Fgate')) {
-        return { data: { check_runs: [] } };
+        return { data: { check_runs: [], total_count: 0 } };
       }
       if (method === 'GET' && path.includes(`check_name=${encodeURIComponent(fixture.producerCheckName)}`)) {
         return { data: { check_runs: producerChecks ?? [defaultCheck] } };
@@ -110,9 +110,9 @@ function fakeClient(fixture, {
         return { data: contentResponse(repositoryPath, texts[repositoryPath], index) };
       }
       if (method === 'GET' && path.includes('/check-runs?filter=latest')) {
-        return { data: { check_runs: [] } };
+        return { data: { check_runs: [], total_count: 0 } };
       }
-      if (method === 'GET' && path.endsWith('/status')) {
+      if (method === 'GET' && path.endsWith('/status?per_page=100')) {
         return { data: { statuses: [] } };
       }
       if (method === 'POST' && path.endsWith('/check-runs')) {
