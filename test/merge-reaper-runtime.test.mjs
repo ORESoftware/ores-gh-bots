@@ -118,7 +118,9 @@ test('runtime keeps exact-head merge and bounded-effect invariants visible at th
   assert.match(source, /\^MERGE-/u);
   assert.match(source, /policy\.requireHumanApproval/u);
   assert.match(source, /action === 'apply' && !policy\.requireHumanApproval/u);
+  assert.match(source, /action === 'apply' && !policy\.requireOptInLabel/u);
   assert.match(source, /Apply requires independent human approval|Merge apply requires independent human approval/u);
+  assert.match(source, /Merge apply requires an explicit per-PR opt-in label/u);
   assert.match(source, /auth\.installationToken\('reaper', repository\.installationId\)/u);
   assert.doesNotMatch(source, /repository\.token/u);
 });
