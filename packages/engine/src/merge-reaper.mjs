@@ -181,6 +181,7 @@ function latestReviewStates(reviews) {
     if (!current || submittedAt > current.submittedAt || (submittedAt === current.submittedAt && Number(review.id) > current.id)) {
       latest.set(login, {
         id: Number(review.id) || 0,
+        login,
         state: String(review.state ?? '').toUpperCase(),
         submittedAt,
         commitId: String(review?.commit_id ?? '').toLowerCase(),
@@ -294,6 +295,7 @@ export function evaluateMergeCandidate({
     && !reviewStates.some((review) => (
       review.state === 'APPROVED'
       && review.type === 'User'
+      && review.login !== String(pullRequest?.user?.login ?? '').trim().toLowerCase()
       && review.submittedAt > 0
       && review.commitId === String(pullRequest?.head?.sha ?? '').toLowerCase()
     ))) {
