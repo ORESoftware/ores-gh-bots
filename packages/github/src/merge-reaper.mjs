@@ -93,8 +93,14 @@ export async function countUnresolvedReviewThreads(client, token, owner, repo, p
     }
     const threads = response.data?.data?.repository?.pullRequest?.reviewThreads;
     if (!threads) throw new Error('GitHub review-thread query did not return a pull request');
-    unresolved += (threads.nodes ?? []).filter((thread) => thread?.isResolved !== true).length;
-    if (!threads.pageInfo?.hasNextPage) return unresolved;
+    // Incomplete GraphQL evidence is not a proof of zero unresolved discussions.
+    // A missing pageInfo.hasNextPage previously terminated the audit as complete.
+    if (!Array.isArray(threads.nodes) || threads.nodes.length > 100
+      || !threads.pageInfo || typeof threads.pageInfo.hasNextPage !== 'boolean') {
+      throw new Error('GitHub review-thread query returned incomplete pagination evidence');
+    }
+    unresolved += threads.nodes.filter((thread) => thread?.isResolved !== true).length;
+    if (!threads.pageInfo.hasNextPage) return unresolved;
     cursor = threads.pageInfo.endCursor;
     if (!cursor) throw new Error('GitHub review-thread pagination did not return an end cursor');
   }
