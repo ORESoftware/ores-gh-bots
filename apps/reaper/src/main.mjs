@@ -278,6 +278,7 @@ async function freshInspection({ candidate, repository, client, auth, policy, ga
     repository.owner,
     repository.repo,
     policy.maxPullRequestsPerRepository,
+    { requireComplete: true },
   );
   const stackedBase = pulls.find((pullRequest) => (
     pullRequest.number !== fresh.number && pullRequest.head?.ref === fresh.baseBranch
@@ -348,7 +349,10 @@ async function main() {
   let observedPullRequests = 0;
   for (const repository of repositories) {
     const listToken = await auth.installationToken('reaper', repository.installationId);
-    const pulls = await listOpenPullRequests(client, listToken, repository.owner, repository.repo, policy.maxPullRequestsPerRepository);
+    const pulls = await listOpenPullRequests(
+      client, listToken, repository.owner, repository.repo,
+      policy.maxPullRequestsPerRepository, { requireComplete: true },
+    );
     observedPullRequests += pulls.length;
     const headBranches = new Map(pulls.map((pullRequest) => [pullRequest.head?.ref, pullRequest]));
     for (const listedPullRequest of pulls) {
