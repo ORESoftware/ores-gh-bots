@@ -33,6 +33,7 @@ import {
   mergePullRequestExact,
 } from '../../../packages/github/src/index.mjs';
 import { resolveFreshDependencyStates } from './dependency-states.mjs';
+import { findStackedBasePullRequest } from './stacked-base.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const modulePath = fileURLToPath(import.meta.url);
@@ -280,9 +281,9 @@ async function freshInspection({ candidate, repository, client, auth, policy, ga
     policy.maxPullRequestsPerRepository,
     { requireComplete: true },
   );
-  const stackedBase = pulls.find((pullRequest) => (
-    pullRequest.number !== fresh.number && pullRequest.head?.ref === fresh.baseBranch
-  ));
+  const stackedBase = findStackedBasePullRequest(
+    pulls, repository.fullName, fresh.baseBranch, fresh.number,
+  );
   fresh.dependencies = unique([
     ...fresh.dependencies,
     ...(stackedBase ? [pullRequestKey(repository.owner, repository.repo, stackedBase.number)] : []),
@@ -354,9 +355,10 @@ async function main() {
       policy.maxPullRequestsPerRepository, { requireComplete: true },
     );
     observedPullRequests += pulls.length;
-    const headBranches = new Map(pulls.map((pullRequest) => [pullRequest.head?.ref, pullRequest]));
     for (const listedPullRequest of pulls) {
-      const stackedBase = headBranches.get(listedPullRequest.base?.ref);
+      const stackedBase = findStackedBasePullRequest(
+        pulls, repository.fullName, listedPullRequest.base?.ref, listedPullRequest.number,
+      );
       const stackedDependency = stackedBase ? pullRequestKey(repository.owner, repository.repo, stackedBase.number) : null;
       try {
         const token = await auth.installationToken('reaper', repository.installationId);
