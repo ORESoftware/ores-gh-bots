@@ -1,4 +1,4 @@
-import { getPullRequest } from './pull-requests.mjs';
+import { getCollaboratorPermission, getPullRequest } from './pull-requests.mjs';
 
 const REPOSITORY_PART = /^[A-Za-z0-9_.-]{1,100}$/u;
 
@@ -16,6 +16,38 @@ function coordinates(owner, repo, prNumber) {
     throw new Error('pull request number is invalid');
   }
   return { owner: safeOwner, repo: safeRepo, prNumber: number };
+}
+
+// Only GitHub's live repository permission endpoint may attest reviewer authority.
+// The raw review JSON is not permitted to provide a self-asserted permission.
+export async function attestMergeReaperReviewerPermissions(client, token, owner, repo, reviews) {
+  coordinates(owner, repo, 1);
+  if (!Array.isArray(reviews)) throw new Error('review permissions require a review array');
+  const logins = new Set();
+  for (const review of reviews) {
+    if (review?.state !== 'APPROVED' || review?.user?.type !== 'User') continue;
+    const login = String(review?.user?.login ?? '').trim().toLowerCase();
+    if (login) logins.add(login);
+  }
+  // A bounded review inspection must not amplify into an unbounded API scan.
+  if (logins.size > 32) throw new Error('too many distinct approving reviewers for bounded permission attestation');
+  const permissions = new Map();
+  for (const login of logins) {
+    let permission;
+    try {
+      permission = await getCollaboratorPermission(client, token, owner, repo, login);
+    } catch (error) {
+      // GitHub reports non-collaborators with 404; ambiguous 403/rate limits
+      // must fail the inspection rather than making an authorization claim.
+      if (Number(error?.status) !== 404) throw error;
+      permission = 'none';
+    }
+    permissions.set(login, String(permission ?? '').trim().toLowerCase());
+  }
+  return reviews.map((review) => ({
+    ...review,
+    verified_reviewer_permission: permissions.get(String(review?.user?.login ?? '').trim().toLowerCase()) ?? null,
+  }));
 }
 
 export async function listMergeReaperPullRequestReviews(client, token, owner, repo, prNumber) {

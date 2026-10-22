@@ -19,6 +19,7 @@ import {
 } from '../../../packages/engine/src/index.mjs';
 import {
   AppAuth,
+  attestMergeReaperReviewerPermissions,
   checkExternalId,
   countUnresolvedReviewThreads,
   findLatestCheckRun,
@@ -119,6 +120,7 @@ function trustedPlaceholderSnapshot(pullRequest, gateAppId, gateExternalId, poli
         // Static screening only: actual exact-head reviews are fetched before eligibility.
         submitted_at: pullRequest.created_at,
         commit_id: pullRequest.head?.sha,
+        verified_reviewer_permission: 'write', // synthetic static preflight only
         user: { login: 'merge-reaper-static-preflight', type: 'User' },
       }]
       : [],
@@ -159,7 +161,7 @@ async function inspectPullRequest({ client, token, repository, listedPullRequest
     };
   }
 
-  const [gateCheck, ciStates, reviews, unresolvedReviewThreads] = await Promise.all([
+  const [gateCheck, ciStates, rawReviews, unresolvedReviewThreads] = await Promise.all([
     findLatestCheckRun(client, token, repository.owner, repository.repo, pullRequest.head.sha, CHECK_NAMES.gate, {
       externalId: gateExternalId,
       appId: gateAppId,
@@ -168,6 +170,9 @@ async function inspectPullRequest({ client, token, repository, listedPullRequest
     listMergeReaperPullRequestReviews(client, token, repository.owner, repository.repo, pullRequest.number),
     countUnresolvedReviewThreads(client, token, repository.owner, repository.repo, pullRequest.number),
   ]);
+  const reviews = await attestMergeReaperReviewerPermissions(
+    client, token, repository.owner, repository.repo, rawReviews,
+  );
   const snapshots = { gateCheck, ciStates, reviews, unresolvedReviewThreads };
   const evaluation = evaluateMergeCandidate({
     pullRequest,

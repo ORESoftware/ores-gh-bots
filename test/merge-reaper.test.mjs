@@ -225,7 +225,7 @@ test('latest human approval can satisfy an approval policy while stale requested
     policy: humanPolicy,
     reviews: [
       { id: 1, state: 'CHANGES_REQUESTED', submitted_at: '2026-09-01T00:00:00Z', user: { login: 'human', type: 'User' } },
-      { id: 2, state: 'APPROVED', submitted_at: '2026-09-02T00:00:00Z', commit_id: 'a'.repeat(40), user: { login: 'human', type: 'User' } },
+      { id: 2, state: 'APPROVED', submitted_at: '2026-09-02T00:00:00Z', commit_id: 'a'.repeat(40), verified_reviewer_permission: 'write', user: { login: 'human', type: 'User' } },
       { id: 3, state: 'COMMENTED', submitted_at: '2026-09-02T00:00:00Z', user: { login: '', type: 'User' } },
     ],
     dependencyStates: { 'other/repo#1': 'merged', 'other/repo#2': 'eligible-earlier' },
@@ -346,7 +346,7 @@ test('human approval must bind to the exact current head', () => {
   const current = evaluate({
     policy: strict,
     reviews: [{ id: 6, state: 'APPROVED', submitted_at: '2026-09-02T19:00:00Z',
-      commit_id: 'a'.repeat(40), user: { login: 'reviewer', type: 'User' } }],
+      commit_id: 'a'.repeat(40), verified_reviewer_permission: 'maintain', user: { login: 'reviewer', type: 'User' } }],
   });
   assert.equal(current.eligible, true);
 });
@@ -436,6 +436,7 @@ test('independent reviewer must not be the PR author even with an exact-head app
     state: 'APPROVED',
     submitted_at: '2026-09-02T19:00:00Z',
     commit_id: 'a'.repeat(40),
+    verified_reviewer_permission: 'admin',
     user: { login: author, type: 'User' },
   };
   const own = evaluate({
@@ -459,7 +460,7 @@ test('missing author metadata cannot satisfy an exact-head human review', () => 
   const strict = validateMergeReaperPolicy({ ...policy, requireHumanApproval: true });
   const review = {
     id: 994, state: 'APPROVED', submitted_at: '2026-09-02T19:00:00Z',
-    commit_id: 'a'.repeat(40), user: { login: 'reviewer', type: 'User' },
+    commit_id: 'a'.repeat(40), verified_reviewer_permission: 'write', user: { login: 'reviewer', type: 'User' },
   };
   for (const user of [null, {}, { login: '' }, { login: '  ' }]) {
     const result = evaluate({ policy: strict, pullRequest: pullRequest({ user }), reviews: [review] });
@@ -472,4 +473,46 @@ test('missing author metadata cannot satisfy an exact-head human review', () => 
     reviews: [review],
   });
   assert.equal(valid.eligible, true);
+});
+
+test('exact-head approval requires live trusted repository permission', () => {
+  const strict = validateMergeReaperPolicy({ ...policy, requireHumanApproval: true });
+  for (const permission of [null, undefined, '', 'none', 'read', 'triage', 'pending']) {
+    const review = {
+      id: 300, state: 'APPROVED', submitted_at: '2026-09-02T19:00:00Z',
+      commit_id: 'a'.repeat(40), verified_reviewer_permission: permission,
+      user: { login: 'non-author', type: 'User' },
+    };
+    const evaluation = evaluate({ policy: strict, reviews: [review] });
+    assert.equal(evaluation.eligible, false, String(permission));
+    assert.ok(evaluation.reasons.includes('missing-human-approval'));
+  }
+  for (const permission of ['write', 'maintain', 'admin']) {
+    const result = evaluate({
+      policy: strict,
+      reviews: [{
+        id: 301, state: 'APPROVED', submitted_at: '2026-09-02T19:00:00Z',
+        commit_id: 'a'.repeat(40), verified_reviewer_permission: permission,
+        user: { login: 'non-author', type: 'User' },
+      }],
+    });
+    assert.equal(result.eligible, true, permission);
+  }
+});
+
+test('authorization and current-head approval must belong to the same reviewer', () => {
+  const strict = validateMergeReaperPolicy({ ...policy, requireHumanApproval: true });
+  const result = evaluate({
+    policy: strict,
+    reviews: [
+      { id: 400, state: 'APPROVED', submitted_at: '2026-09-02T19:00:00Z',
+        commit_id: 'a'.repeat(40), verified_reviewer_permission: 'read',
+        user: { login: 'external', type: 'User' } },
+      { id: 401, state: 'APPROVED', submitted_at: '2026-09-02T19:00:00Z',
+        commit_id: 'b'.repeat(40), verified_reviewer_permission: 'admin',
+        user: { login: 'maintainer', type: 'User' } },
+    ],
+  });
+  assert.equal(result.eligible, false);
+  assert.ok(result.reasons.includes('missing-human-approval'));
 });
