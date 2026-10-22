@@ -186,6 +186,7 @@ function latestReviewStates(reviews) {
         submittedAt,
         commitId: String(review?.commit_id ?? '').toLowerCase(),
         type: String(review?.user?.type ?? ''),
+        permission: String(review?.verified_reviewer_permission ?? '').toLowerCase(),
       });
     }
   }
@@ -312,6 +313,7 @@ export function evaluateMergeCandidate({
       review.state === 'APPROVED'
       && review.type === 'User'
       && review.login !== prAuthorLogin
+      && ['write', 'maintain', 'admin'].includes(review.permission)
       && review.submittedAt > 0
       && review.commitId === String(pullRequest?.head?.sha ?? '').toLowerCase()
     )))) {
