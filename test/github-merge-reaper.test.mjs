@@ -183,3 +183,39 @@ test('base SHA is mandatory before any network access', async () => {
     /expectedBaseSha/u,
   );
 });
+
+
+test('incomplete GraphQL review-thread evidence is never zero unresolved threads', async () => {
+  for (const evidence of [
+    { nodes: [] },
+    { nodes: [], pageInfo: null },
+    { nodes: [], pageInfo: {} },
+    { nodes: [], pageInfo: { hasNextPage: null } },
+    { nodes: null, pageInfo: { hasNextPage: false } },
+    { nodes: {}, pageInfo: { hasNextPage: false } },
+    { nodes: Array.from({ length: 101 }, () => ({ isResolved: true })), pageInfo: { hasNextPage: false } },
+  ]) {
+    const client = {
+      async request() {
+        return { data: { data: { repository: { pullRequest: { reviewThreads: evidence } } } } };
+      },
+    };
+    await assert.rejects(
+      countUnresolvedReviewThreads(client, 'token', 'owner', 'repo', 1),
+      /review-thread query returned incomplete pagination evidence/u,
+      JSON.stringify(evidence).slice(0, 130),
+    );
+  }
+});
+
+test('explicit final review-thread page containing unresolved threads is counted', async () => {
+  const client = {
+    async request() {
+      return { data: { data: { repository: { pullRequest: { reviewThreads: {
+        nodes: [{ isResolved: true }, { isResolved: false }, {}],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      } } } } } };
+    },
+  };
+  assert.equal(await countUnresolvedReviewThreads(client, 'token', 'owner', 'repo', 1), 2);
+});
