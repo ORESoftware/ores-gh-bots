@@ -54,7 +54,15 @@ export async function listMergeReaperPullRequestReviews(client, token, owner, re
   const target = coordinates(owner, repo, prNumber);
   return client.paginate(
     `/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}/pulls/${target.prNumber}/reviews?per_page=100`,
-    { token, maxPages: 10, map: (data) => (Array.isArray(data) ? data : []) },
+    {
+      token,
+      maxPages: 10,
+      requireComplete: true,
+      map: (data) => {
+        if (!Array.isArray(data)) throw new Error('GitHub PR review history response must be an array');
+        return data;
+      },
+    },
   );
 }
 
