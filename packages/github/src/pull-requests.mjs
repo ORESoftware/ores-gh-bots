@@ -10,11 +10,12 @@ export async function listPullRequestFiles(client, token, owner, repo, prNumber)
   });
 }
 
-export async function listOpenPullRequests(client, token, owner, repo, perPage = 100) {
+export async function listOpenPullRequests(client, token, owner, repo, perPage = 100, { requireComplete = false } = {}) {
   const pulls = await client.paginate(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls?state=open&sort=updated&direction=desc&per_page=${Math.min(perPage, 100)}`, {
     token,
     map: (data) => data,
     maxPages: Math.max(1, Math.ceil(perPage / 100)),
+    requireComplete,
   });
   return pulls.slice(0, perPage);
 }
