@@ -242,7 +242,9 @@ export function evaluateMergeCandidate({
   const headRef = String(pullRequest?.head?.ref ?? '');
   if (/^(?:ci[-_/]mirror|ci[-_/]exact|ci[-_/]source[-_/]free|carrier)(?:[\/_-]|$)/iu.test(headRef)
     || /^ci\/oreslang-[0-9a-f]{40}$/iu.test(headRef)
-    || /^ci\/authorized-[0-9a-f]{40}$/iu.test(headRef)) {
+    || /^ci\/authorized-[0-9a-f]{40}$/iu.test(headRef)
+    // Source-free carrier control dispatches are test infrastructure, not deployable PRs.
+    || /^ci\/oreslang-control-/iu.test(headRef)) {
     reasons.push('explicit-non-merge-carrier-branch');
   }
   if (pullRequest?.auto_merge) reasons.push('native-auto-merge-already-enabled');
