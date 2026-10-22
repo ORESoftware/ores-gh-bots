@@ -388,6 +388,9 @@ test('temporary cross-org CI mirrors are never eligible for a production merge',
     'carrier/orestra-private-tree',
     `ci/oreslang-${'b'.repeat(40)}`,
     `ci/authorized-${'a'.repeat(40)}`,
+    `ci/oreslang-control-${'d'.repeat(40)}`,
+    'ci/oreslang-control-untrusted',
+    'ci/oreslang-control-unknown-revision',
   ]) {
     const result = evaluate({
       pullRequest: pullRequest({
