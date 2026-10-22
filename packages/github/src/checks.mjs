@@ -282,7 +282,14 @@ export async function getCiSnapshot(client, token, owner, repo, headSha) {
 
   const statuses = new Map();
   for (const status of commitStatuses) {
-    if (OWN_CHECK_NAMES.has(status.context) || checkContexts.has(status.context)) continue;
+    if (OWN_CHECK_NAMES.has(status.context)) continue;
+    // Check Runs and legacy commit statuses are different evidence authorities.
+    // Never silently discard a failed or pending legacy status because a
+    // same-name Check Run exists (possibly from an unrelated GitHub App).
+    // GitHub cannot establish that the two contexts describe the same test.
+    if (checkContexts.has(status.context)) {
+      throw new Error('CI context collision: Check Run and commit status share a name');
+    }
     const current = statuses.get(status.context);
     if (!current || status.id > current.id) statuses.set(status.context, {
       id: status.id,

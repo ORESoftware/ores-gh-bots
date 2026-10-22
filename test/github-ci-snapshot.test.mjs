@@ -84,3 +84,41 @@ test('CI snapshot rejects missing or full commit-status pages rather than hiding
     );
   }
 });
+
+
+test('CI snapshot rejects same-name Check Run and legacy commit status regardless of their conclusions', async () => {
+  for (const legacyState of ['success', 'failure', 'pending', 'error']) {
+    const c = clientWithSnapshot({
+      checkRuns: [{
+        id: 91,
+        name: 'build-and-test',
+        status: 'completed',
+        conclusion: 'success',
+        app: { id: 42 },
+      }],
+      statuses: [{ id: 12, context: 'build-and-test', state: legacyState }],
+    });
+    await assert.rejects(
+      getCiSnapshot(c, 'test-token', 'owner', 'repo', 'a'.repeat(40)),
+      /CI context collision: Check Run and commit status share a name/u,
+    );
+  }
+});
+
+test('CI snapshot accepts a separate passing Check Run and failing legacy context without hiding the failure', async () => {
+  const c = clientWithSnapshot({
+    checkRuns: [{
+      id: 11,
+      name: 'build-and-test',
+      status: 'completed',
+      conclusion: 'success',
+      app: { id: 42 },
+    }],
+    statuses: [{ id: 12, context: 'security-scan', state: 'failure' }],
+  });
+  const actual = await getCiSnapshot(c, 'test-token', 'owner', 'repo', 'b'.repeat(40));
+  assert.deepEqual(actual.map((item) => [item.context, item.state]), [
+    ['build-and-test', 'success'],
+    ['security-scan', 'failure'],
+  ]);
+});
