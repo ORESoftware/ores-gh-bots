@@ -46,13 +46,14 @@ test('exact merge re-fetches mutable state and pins the merge request SHA', asyn
   const client = {
     async request(method, path, options = {}) {
       calls.push({ method, path, options });
-      if (method === 'GET') return { data: { state: 'open', draft: false, mergeable: true, mergeable_state: 'clean', head: { sha } } };
+      if (method === 'GET') return { data: { state: 'open', draft: false, mergeable: true, mergeable_state: 'clean', head: { sha }, base: { sha: 'c'.repeat(40) } } };
       if (method === 'PUT') return { data: { merged: true, sha: 'b'.repeat(40) } };
       throw new Error(`Unexpected request ${method} ${path}`);
     },
   };
   const result = await mergePullRequestExact(client, 'token', 'o', 'r', 8, {
     expectedHeadSha: sha,
+    expectedBaseSha: 'c'.repeat(40),
     method: 'squash',
     commitTitle: 'Title',
   });
@@ -71,7 +72,7 @@ test('exact merge refuses stale heads before any write', async () => {
     },
   };
   await assert.rejects(
-    mergePullRequestExact(client, 'token', 'o', 'r', 8, { expectedHeadSha: 'a'.repeat(40) }),
+    mergePullRequestExact(client, 'token', 'o', 'r', 8, { expectedHeadSha: 'a'.repeat(40), expectedBaseSha: 'c'.repeat(40) }),
     /head changed/u,
   );
   assert.deepEqual(calls, ['GET']);
@@ -98,15 +99,15 @@ test('review thread audit rejects GraphQL errors, missing pull requests, broken 
 test('exact merge input and mutable-state validation remain fail closed', async () => {
   const unexpected = { async request() { throw new Error('must not call'); } };
   await assert.rejects(mergePullRequestExact(unexpected, 't', 'o', 'r', 1, { expectedHeadSha: 'bad' }), /expectedHeadSha/u);
-  await assert.rejects(mergePullRequestExact(unexpected, 't', 'o', 'r', 1, { expectedHeadSha: 'a'.repeat(40), method: 'force' }), /Unsupported/u);
+  await assert.rejects(mergePullRequestExact(unexpected, 't', 'o', 'r', 1, { expectedHeadSha: 'a'.repeat(40), expectedBaseSha: 'c'.repeat(40), method: 'force' }), /Unsupported/u);
 
   for (const [current, pattern] of [
     [{ state: 'closed', draft: false, mergeable: true, mergeable_state: 'clean', head: { sha: 'a'.repeat(40) } }, /no longer open/u],
     [{ state: 'open', draft: true, mergeable: true, mergeable_state: 'clean', head: { sha: 'a'.repeat(40) } }, /became a draft/u],
     [{ state: 'open', draft: false, mergeable: false, mergeable_state: 'dirty', head: { sha: 'a'.repeat(40) } }, /not cleanly mergeable/u],
   ]) {
-    const client = { async request() { return { data: current }; } };
-    await assert.rejects(mergePullRequestExact(client, 't', 'o', 'r', 1, { expectedHeadSha: 'a'.repeat(40) }), pattern);
+    const client = { async request() { return { data: { ...current, base: { sha: 'c'.repeat(40) } } }; } };
+    await assert.rejects(mergePullRequestExact(client, 't', 'o', 'r', 1, { expectedHeadSha: 'a'.repeat(40), expectedBaseSha: 'c'.repeat(40) }), pattern);
   }
 });
 
@@ -116,13 +117,14 @@ test('GitHub merge refusal is surfaced without pretending success', async () => 
   const client = {
     async request(method) {
       count += 1;
-      if (method === 'GET') return { data: { state: 'open', draft: false, mergeable: true, mergeable_state: 'clean', head: { sha } } };
+      if (method === 'GET') return { data: { state: 'open', draft: false, mergeable: true, mergeable_state: 'clean', head: { sha }, base: { sha: 'c'.repeat(40) } } };
       return { data: { merged: false, message: 'branch protection rejected merge' } };
     },
   };
   await assert.rejects(
     mergePullRequestExact(client, 't', 'o', 'r', 1, {
       expectedHeadSha: sha,
+    expectedBaseSha: 'c'.repeat(40),
       commitMessage: 'message',
     }),
     /branch protection rejected merge/u,
@@ -137,15 +139,47 @@ test('exact merge helpers reject malformed repository coordinates and pagination
     async paginate() { assert.fail('network must not be touched'); },
   };
   await assert.rejects(
-    mergePullRequestExact(client, 't', '../owner', 'repo', 1, { expectedHeadSha: 'a'.repeat(40) }),
+    mergePullRequestExact(client, 't', '../owner', 'repo', 1, { expectedHeadSha: 'a'.repeat(40), expectedBaseSha: 'c'.repeat(40) }),
     /repository owner is invalid/u,
   );
   await assert.rejects(
-    mergePullRequestExact(client, 't', 'owner', 'repo', 0, { expectedHeadSha: 'a'.repeat(40) }),
+    mergePullRequestExact(client, 't', 'owner', 'repo', 0, { expectedHeadSha: 'a'.repeat(40), expectedBaseSha: 'c'.repeat(40) }),
     /pull request number is invalid/u,
   );
   await assert.rejects(
     countUnresolvedReviewThreads(client, 't', 'owner', 'repo', 1, { maxPages: 0 }),
     /maxPages/u,
+  );
+});
+
+
+test('base SHA movement blocks merge even when head and CI are unchanged', async () => {
+  const methods = [];
+  const client = {
+    async request(method) {
+      methods.push(method);
+      if (method !== 'GET') throw new Error('unexpected merge write');
+      return { data: {
+        state: 'open', draft: false, mergeable: true, mergeable_state: 'clean',
+        head: { sha: 'a'.repeat(40) }, base: { sha: 'd'.repeat(40) },
+      } };
+    },
+  };
+  await assert.rejects(
+    mergePullRequestExact(client, 'token', 'org', 'repo', 8, {
+      expectedHeadSha: 'a'.repeat(40), expectedBaseSha: 'c'.repeat(40),
+    }),
+    /base changed before merge/u,
+  );
+  assert.deepEqual(methods, ['GET']);
+});
+
+test('base SHA is mandatory before any network access', async () => {
+  const client = { async request() { assert.fail('must not call network'); } };
+  await assert.rejects(
+    mergePullRequestExact(client, 'token', 'org', 'repo', 8, {
+      expectedHeadSha: 'a'.repeat(40),
+    }),
+    /expectedBaseSha/u,
   );
 });

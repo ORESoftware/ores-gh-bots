@@ -99,6 +99,7 @@ test('runtime keeps exact-head merge and bounded-effect invariants visible at th
 
   assert.equal(policy.maxMerges, 3);
   assert.equal(policy.requireOptInLabel, true);
+  assert.equal(policy.requireHumanApproval, true);
   assert.ok(policy.optInLabels.length > 0);
   assert.ok(policy.denyLabels.length > 0);
   assert.match(source, /findLatestCheckRun/u);
@@ -108,12 +109,20 @@ test('runtime keeps exact-head merge and bounded-effect invariants visible at th
   assert.match(source, /freshInspection/u);
   assert.match(source, /mergePullRequestExact/u);
   assert.match(source, /expectedHeadSha:\s*fresh\.headSha/u);
+  assert.match(source, /expectedBaseSha:\s*fresh\.pullRequest\.base\.sha/u);
+  assert.match(source, /head-or-base-moved-since-selection/u);
   assert.match(source, /selectMergeBatch\(ordered, policy\.maxMerges\)/u);
   assert.match(source, /mode:\s*0o600/u);
   assert.match(source, /privateMetadataRedacted:\s*true/u);
   assert.match(source, /Merge reaper and gate GitHub App identities must be distinct/u);
   assert.match(source, /\^MERGE-/u);
   assert.match(source, /policy\.requireHumanApproval/u);
+  assert.match(source, /action === 'apply' && !policy\.requireHumanApproval/u);
+  assert.match(source, /action === 'apply' && !policy\.requireOptInLabel/u);
+  assert.match(source, /action === 'apply' && policy\.ignoredCiContexts\.length > 0/u);
+  assert.match(source, /Merge apply cannot ignore CI contexts/u);
+  assert.match(source, /Apply requires independent human approval|Merge apply requires independent human approval/u);
+  assert.match(source, /Merge apply requires an explicit per-PR opt-in label/u);
   assert.match(source, /auth\.installationToken\('reaper', repository\.installationId\)/u);
   assert.doesNotMatch(source, /repository\.token/u);
 });

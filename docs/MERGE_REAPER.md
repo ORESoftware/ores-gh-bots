@@ -14,16 +14,16 @@ The checked-in manifest intentionally has no webhook events. The reaper runs onl
 
 `packages/engine/src/merge-reaper.mjs` is the policy authority. Before selection, a candidate must satisfy all configured constraints, including:
 
-- open, non-draft, cleanly mergeable state;
+- open, non-draft, cleanly mergeable state, excluding explicitly marked `CI ONLY`, `TEST ONLY`, or `DO NOT MERGE` probes;
 - minimum age and allowed base branch;
 - explicit automerge opt-in and no deny label;
 - exact current-head `ores-review/gate` success from the configured Gate App, with the deterministic external ID;
-- at least one independent CI context and no non-successful effective CI context;
-- no current `CHANGES_REQUESTED` review and, when configured, a human approval;
+- at least one independent CI context with an actual `success` conclusion (never skipped/neutral) and no non-successful effective CI context;
+- no current `CHANGES_REQUESTED` review and a human approval on the **exact current head** by default;
 - no unresolved review threads;
 - all declared/stacked dependencies ready.
 
-The policy hard-caps one run at three merge effects. Immediately before each effect, the executable re-fetches the pull request and all gate/CI/review/thread evidence, recomputes dependency state, and then calls `mergePullRequestExact`, which binds GitHub's merge request to the freshly observed head SHA.
+The policy hard-caps one run at three merge effects. Immediately before each effect, the executable re-fetches the pull request and all gate/CI/review/thread evidence, recomputes dependency state, and then calls `mergePullRequestExact`, which refuses a changed head **or base** since eligibility and verifies both SHAs again immediately before GitHub's head-bound merge API. A base update requires a fresh plan; there is no automatic fallback to a different merge method.
 
 ## Commands
 
@@ -34,7 +34,7 @@ node apps/reaper/src/main.mjs reaper plan
 node apps/reaper/src/main.mjs reaper apply --confirm MERGE-<ticket>
 ```
 
-`plan` never writes to GitHub. `apply` requires a bounded `MERGE-*` acknowledgement in addition to the policy gates. The scheduled workflow supplies its own fixed acknowledgement only after its local-time admission gate and repository verification succeed.
+`plan` never writes to GitHub. `apply` requires a bounded `MERGE-*` acknowledgement in addition to the policy gates. In apply mode, **independent exact-head human approval, explicit PR opt-in, and every non-gate CI context are mandatory**: `requireHumanApproval=false`, `requireOptInLabel=false`, or a nonempty `ignoredCiContexts` list is rejected even when requested by a policy override. Plan mode may simulate alternative policies, but it never authorizes a merge. The scheduled workflow supplies its own fixed acknowledgement only after its local-time admission gate and repository verification succeed.
 
 ## Reports
 
@@ -45,3 +45,5 @@ The executable writes the detailed report as mode `0600`. That report can includ
 The code and workflow being present does not mean the reaper is live. Activation still requires registering the dedicated App, installing it only on intended accounts, provisioning the two secrets through the approved encrypted secret path, validating installation inventory, and first exercising manual `plan` mode. Keep scheduled apply inert until those prerequisites and the normal review-control-plane canary evidence are complete.
 
 This runtime is a semantic salvage of the useful merge-reaper capability that was stranded in stale activation PR #15. It deliberately uses current `main` engine/GitHub helpers instead of merging that historical snapshot.
+
+The example and built-in policy require a human approval. `plan` may model a policy with `requireHumanApproval=false` for diagnostics, but **`apply` always rejects that override**. A valid approval must be submitted against the exact PR head by a human who is not the PR author; an unknown author identity is not proof of independence. GitHub ruleset permissions are a separate requirement; never interpret missing approvals or skipped checks as green. GitHub's merge endpoint only atomically pins the head SHA, so a final external base-branch movement remains an operational race that must also be controlled by branch protections and merge queues.

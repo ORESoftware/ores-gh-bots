@@ -116,7 +116,9 @@ function trustedPlaceholderSnapshot(pullRequest, gateAppId, gateExternalId, poli
       ? [{
         id: 1,
         state: 'APPROVED',
-        submitted_at: '1970-01-01T00:00:00.000Z',
+        // Static screening only: actual exact-head reviews are fetched before eligibility.
+        submitted_at: pullRequest.created_at,
+        commit_id: pullRequest.head?.sha,
         user: { login: 'merge-reaper-static-preflight', type: 'User' },
       }]
       : [],
@@ -315,6 +317,21 @@ async function main() {
     maxRepositories: cli.values.MERGE_REAPER_MAX_REPOSITORIES,
     maxPullRequestsPerRepository: cli.values.MERGE_REAPER_MAX_PRS_PER_REPOSITORY,
   });
+  // Planning may simulate relaxed policies; live merges may never waive
+  // independent human review, even through a caller-controlled policy file.
+  if (action === 'apply' && !policy.requireHumanApproval) {
+    throw new Error('Merge apply requires independent human approval; requireHumanApproval=false is plan-only');
+  }
+  // Merge opt-in is mandatory in apply mode, even when a custom policy file
+  // disables the default. A batch request is not approval for every open PR.
+  if (action === 'apply' && !policy.requireOptInLabel) {
+    throw new Error('Merge apply requires an explicit per-PR opt-in label; requireOptInLabel=false is plan-only');
+  }
+  // An apply policy must not silently hide failing CI contexts from the
+  // independent-check gate. Ignore lists are diagnostic only in plan mode.
+  if (action === 'apply' && policy.ignoredCiContexts.length > 0) {
+    throw new Error('Merge apply cannot ignore CI contexts; ignoredCiContexts is plan-only');
+  }
   const logger = createLogger({ service: 'ores-gh-bots-reaper' });
   const client = new GitHubClient({ apiBaseUrl: config.github.apiBaseUrl, apiVersion: config.github.apiVersion });
   const auth = new AppAuth({ client, apps: { ...config.apps, reaper }, logger });
@@ -393,6 +410,13 @@ async function main() {
       const repository = repositoryByName.get(candidate.repository);
       try {
         const fresh = await freshInspection({ candidate, repository, client, auth, policy, gateAppId });
+        // A passing check on the PR head is insufficient if the target branch
+        // advanced since selection; require a new plan against the new base.
+        if (!candidate.pullRequest?.base?.sha || fresh.pullRequest?.base?.sha !== candidate.pullRequest.base.sha
+          || fresh.headSha !== candidate.headSha) {
+          mergeResults.push({ key: candidate.key, merged: false, reason: 'head-or-base-moved-since-selection' });
+          continue;
+        }
         const dependencyCache = new Map();
         const dependencyStates = await resolveFreshDependencyStates({
           freshDependencies: fresh.dependencies,
@@ -422,6 +446,7 @@ async function main() {
         const mergeToken = await auth.installationToken('reaper', repository.installationId);
         const result = await mergePullRequestExact(client, mergeToken, repository.owner, repository.repo, candidate.number, {
           expectedHeadSha: fresh.headSha,
+          expectedBaseSha: fresh.pullRequest.base.sha,
           method: policy.mergeMethod,
           commitTitle: `${fresh.title} (#${fresh.number})`,
           commitMessage: `Merged by the ORES dependency-aware reaper after ${policy.minimumAgeHours}h, exact-SHA ORES gate validation, independent CI success, review-thread resolution, and explicit automerge opt-in.`,

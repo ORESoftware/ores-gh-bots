@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { evaluateMergeCandidate, validateMergeReaperPolicy } from '../packages/engine/src/merge-reaper.mjs';
 
 const SHA = 'a'.repeat(40);
-const policy = validateMergeReaperPolicy({ minimumAgeHours: 1 });
+const policy = validateMergeReaperPolicy({ minimumAgeHours: 1, requireHumanApproval: false });
 
 function candidate(baseRepo, externalId) {
   return evaluateMergeCandidate({

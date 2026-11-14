@@ -15,12 +15,14 @@ const policy = validateMergeReaperPolicy({
   maxMerges: 3,
   maxRepositories: 100,
   maxPullRequestsPerRepository: 100,
+  requireHumanApproval: false,
   repositoryDependencies: {},
 });
 
 function pullRequest(overrides = {}) {
   return {
     number: 7,
+    user: { login: 'author' },
     state: 'open',
     draft: false,
     auto_merge: null,
@@ -223,7 +225,7 @@ test('latest human approval can satisfy an approval policy while stale requested
     policy: humanPolicy,
     reviews: [
       { id: 1, state: 'CHANGES_REQUESTED', submitted_at: '2026-09-01T00:00:00Z', user: { login: 'human', type: 'User' } },
-      { id: 2, state: 'APPROVED', submitted_at: '2026-09-02T00:00:00Z', user: { login: 'human', type: 'User' } },
+      { id: 2, state: 'APPROVED', submitted_at: '2026-09-02T00:00:00Z', commit_id: 'a'.repeat(40), user: { login: 'human', type: 'User' } },
       { id: 3, state: 'COMMENTED', submitted_at: '2026-09-02T00:00:00Z', user: { login: '', type: 'User' } },
     ],
     dependencyStates: { 'other/repo#1': 'merged', 'other/repo#2': 'eligible-earlier' },
@@ -323,4 +325,151 @@ test('canonical dependency parser rejects ambiguous multi-target reaper directiv
     () => parseMergeReaperDependencies('Depends-On: other/lib#1, #2', { owner: 'Org', repo: 'Repo' }),
     /Invalid PR dependency declaration/u,
   );
+});
+
+
+test('secure default requires an independent human review', () => {
+  assert.equal(validateMergeReaperPolicy().requireHumanApproval, true);
+  const withoutApproval = evaluate({ policy: validateMergeReaperPolicy({ minimumAgeHours: 55 }) });
+  assert.equal(withoutApproval.eligible, false);
+  assert.ok(withoutApproval.reasons.includes('missing-human-approval'));
+});
+
+test('human approval must bind to the exact current head', () => {
+  const strict = validateMergeReaperPolicy({ ...policy, requireHumanApproval: true });
+  const stale = evaluate({
+    policy: strict,
+    reviews: [{ id: 5, state: 'APPROVED', submitted_at: '2026-09-02T19:00:00Z',
+      commit_id: 'b'.repeat(40), user: { login: 'reviewer', type: 'User' } }],
+  });
+  assert.ok(stale.reasons.includes('missing-human-approval'));
+  const current = evaluate({
+    policy: strict,
+    reviews: [{ id: 6, state: 'APPROVED', submitted_at: '2026-09-02T19:00:00Z',
+      commit_id: 'a'.repeat(40), user: { login: 'reviewer', type: 'User' } }],
+  });
+  assert.equal(current.eligible, true);
+});
+
+test('skipped and neutral check runs never satisfy passing CI', () => {
+  for (const conclusion of ['skipped', 'neutral', null]) {
+    const result = evaluate({ ciStates: [{
+      context: 'ci/verify', source: 'check_run', state: 'success',
+      rawStatus: 'completed', rawConclusion: conclusion,
+    }] });
+    assert.equal(result.eligible, false, String(conclusion));
+    assert.ok(result.reasons.some((reason) => reason.startsWith('ci-check-not-passing:ci/verify:')));
+  }
+});
+
+test('explicit CI-only / do-not-merge PR titles are unconditionally denied', () => {
+  for (const title of ['[CI ONLY] capacity probe', '[TEST-ONLY] mirror', 'SECURITY TEST — DO NOT MERGE']) {
+    const result = evaluate({ pullRequest: pullRequest({ title }) });
+    assert.ok(result.reasons.includes('explicit-non-merge-title'), title);
+  }
+});
+
+test('temporary cross-org CI mirrors are never eligible for a production merge', () => {
+  for (const title of [
+    'CI mirror: Oreslang #1313 async diagnostics',
+    'Exact-tree carrier: actor branch',
+    '[CI ONLY] private-source replay',
+    'TEST-ONLY: runner allocation',
+  ]) {
+    const result = evaluate({ pullRequest: pullRequest({ title }) });
+    assert.equal(result.eligible, false, title);
+    assert.ok(result.reasons.includes('explicit-non-merge-title'), title);
+  }
+
+  for (const ref of [
+    'ci-mirror/actor-source-exact-tree',
+    'ci/exact/llvm-actor',
+    'ci-source-free/probe',
+    'carrier/orestra-private-tree',
+    `ci/oreslang-${'b'.repeat(40)}`,
+    `ci/authorized-${'a'.repeat(40)}`,
+  ]) {
+    const result = evaluate({
+      pullRequest: pullRequest({
+        title: 'Updated scheduler',
+        head: { sha: 'a'.repeat(40), ref },
+      }),
+    });
+    assert.equal(result.eligible, false, ref);
+    assert.ok(result.reasons.includes('explicit-non-merge-carrier-branch'), ref);
+  }
+
+  const ordinary = evaluate({
+    pullRequest: pullRequest({
+      title: 'fix: scheduler admission',
+      head: { sha: 'a'.repeat(40), ref: 'fix/scheduler-admission' },
+    }),
+  });
+  assert.equal(ordinary.eligible, true);
+});
+
+test('temporary carrier and do-not-merge labels cannot be weakened by a policy override', () => {
+  const relaxed = validateMergeReaperPolicy({
+    ...policy,
+    denyLabels: [],
+    requireOptInLabel: false,
+  });
+  for (const label of ['do-not-merge', 'ci-only', 'test-only', 'test-carrier', 'private-mirror']) {
+    const result = evaluate({
+      policy: relaxed,
+      pullRequest: pullRequest({
+        title: 'Ordinary feature',
+        head: { sha: 'a'.repeat(40), ref: 'fix/normal' },
+        labels: [{ name: label }],
+      }),
+    });
+    assert.equal(result.eligible, false, label);
+    assert.ok(result.reasons.some(reason => reason.startsWith('explicit-non-merge-label:')), label);
+  }
+});
+
+test('independent reviewer must not be the PR author even with an exact-head approval', () => {
+  const strict = validateMergeReaperPolicy({ ...policy, requireHumanApproval: true });
+  const author = 'self-reviewer';
+  const approval = {
+    id: 991,
+    state: 'APPROVED',
+    submitted_at: '2026-09-02T19:00:00Z',
+    commit_id: 'a'.repeat(40),
+    user: { login: author, type: 'User' },
+  };
+  const own = evaluate({
+    policy: strict,
+    pullRequest: pullRequest({ user: { login: author } }),
+    reviews: [approval],
+  });
+  assert.equal(own.eligible, false);
+  assert.ok(own.reasons.includes('missing-human-approval'));
+
+  const independent = evaluate({
+    policy: strict,
+    pullRequest: pullRequest({ user: { login: 'different-author' } }),
+    reviews: [approval],
+  });
+  assert.equal(independent.eligible, true);
+  assert.ok(!independent.reasons.includes('missing-human-approval'));
+});
+
+test('missing author metadata cannot satisfy an exact-head human review', () => {
+  const strict = validateMergeReaperPolicy({ ...policy, requireHumanApproval: true });
+  const review = {
+    id: 994, state: 'APPROVED', submitted_at: '2026-09-02T19:00:00Z',
+    commit_id: 'a'.repeat(40), user: { login: 'reviewer', type: 'User' },
+  };
+  for (const user of [null, {}, { login: '' }, { login: '  ' }]) {
+    const result = evaluate({ policy: strict, pullRequest: pullRequest({ user }), reviews: [review] });
+    assert.equal(result.eligible, false);
+    assert.ok(result.reasons.includes('missing-human-approval'));
+  }
+  const valid = evaluate({
+    policy: strict,
+    pullRequest: pullRequest({ user: { login: 'the-author' } }),
+    reviews: [review],
+  });
+  assert.equal(valid.eligible, true);
 });

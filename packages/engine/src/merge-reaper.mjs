@@ -20,7 +20,7 @@ export const DEFAULT_REAPER_POLICY = Object.freeze({
     'no-automerge',
     'security-review',
   ]),
-  requireHumanApproval: false,
+  requireHumanApproval: true,
   ignoredCiContexts: Object.freeze([]),
   repositoryDependencies: Object.freeze({}),
 });
@@ -181,8 +181,10 @@ function latestReviewStates(reviews) {
     if (!current || submittedAt > current.submittedAt || (submittedAt === current.submittedAt && Number(review.id) > current.id)) {
       latest.set(login, {
         id: Number(review.id) || 0,
+        login,
         state: String(review.state ?? '').toUpperCase(),
         submittedAt,
+        commitId: String(review?.commit_id ?? '').toLowerCase(),
         type: String(review?.user?.type ?? ''),
       });
     }
@@ -229,6 +231,19 @@ export function evaluateMergeCandidate({
 
   if (pullRequest?.state !== 'open') reasons.push('pull-request-not-open');
   if (pullRequest?.draft) reasons.push('draft-pull-request');
+  // CI mirrors, exact-tree carriers, and explicitly non-mergeable probes
+  // are execution evidence, not deployable source PRs. Deny them regardless
+  // of opt-in labels or a passing status supplied by the test organization.
+  const title = String(pullRequest?.title ?? '');
+  if (/\b(?:do[\s-]+not[\s-]+merge|(?:ci|test)[\s-]+only|ci[\s-]+mirror|exact[\s-]+tree[\s-]+carrier)\b/iu.test(title)) {
+    reasons.push('explicit-non-merge-title');
+  }
+  const headRef = String(pullRequest?.head?.ref ?? '');
+  if (/^(?:ci[-_/]mirror|ci[-_/]exact|ci[-_/]source[-_/]free|carrier)(?:[\/_-]|$)/iu.test(headRef)
+    || /^ci\/oreslang-[0-9a-f]{40}$/iu.test(headRef)
+    || /^ci\/authorized-[0-9a-f]{40}$/iu.test(headRef)) {
+    reasons.push('explicit-non-merge-carrier-branch');
+  }
   if (pullRequest?.auto_merge) reasons.push('native-auto-merge-already-enabled');
 
   const age = ageHours(pullRequest?.created_at, now);
@@ -243,6 +258,10 @@ export function evaluateMergeCandidate({
   const labels = labelNames(pullRequest);
   const denied = normalizedPolicy.denyLabels.filter((label) => labels.includes(label));
   if (denied.length > 0) reasons.push(`denied-label:${denied.join(',')}`);
+  // Explicit non-merge and temporary-carrier labels are absolute denials:
+  // no caller-supplied policy can remove them from the deny list.
+  const nonMergeLabels = labels.filter((label) => /^(?:do[-_ ]?not[-_ ]?merge|ci[-_ ]?only|test[-_ ]?only|test[-_ ]?carrier|private[-_ ]?mirror)$/iu.test(label));
+  if (nonMergeLabels.length > 0) reasons.push(`explicit-non-merge-label:${nonMergeLabels.join(',')}`);
   if (normalizedPolicy.requireOptInLabel && !normalizedPolicy.optInLabels.some((label) => labels.includes(label))) {
     reasons.push('missing-automerge-opt-in-label');
   }
@@ -276,12 +295,26 @@ export function evaluateMergeCandidate({
   if (effectiveCiStates.length === 0) reasons.push('no-independent-ci-contexts');
   for (const ci of effectiveCiStates) {
     if (ci.state !== 'success') reasons.push(`ci-not-success:${ci.context}:${ci.state}`);
+    // General-purpose check snapshots may normalize skipped/neutral conclusions
+    // to success. Neither is evidence that the CI workload actually passed.
+    if (ci.source === 'check_run' && (ci.rawStatus !== 'completed' || ci.rawConclusion !== 'success')) {
+      reasons.push(`ci-check-not-passing:${ci.context}:${ci.rawConclusion ?? ci.rawStatus ?? 'missing'}`);
+    }
   }
 
   const reviewStates = latestReviewStates(reviews);
   if (reviewStates.some((review) => review.state === 'CHANGES_REQUESTED')) reasons.push('changes-requested');
+  // A reviewer cannot be independent when GitHub did not supply a usable PR author.
+  // Do not turn missing identity into an empty-string comparison that accepts anyone.
+  const prAuthorLogin = String(pullRequest?.user?.login ?? '').trim().toLowerCase();
   if (normalizedPolicy.requireHumanApproval
-    && !reviewStates.some((review) => review.state === 'APPROVED' && review.type === 'User')) {
+    && (!prAuthorLogin || !reviewStates.some((review) => (
+      review.state === 'APPROVED'
+      && review.type === 'User'
+      && review.login !== prAuthorLogin
+      && review.submittedAt > 0
+      && review.commitId === String(pullRequest?.head?.sha ?? '').toLowerCase()
+    )))) {
     reasons.push('missing-human-approval');
   }
 

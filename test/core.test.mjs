@@ -84,6 +84,7 @@ test('CI snapshot preserves source and raw Check Run semantics', async () => {
       if (path.includes('/check-runs?')) {
         return {
           data: {
+            total_count: 1,
             check_runs: [
               {
                 id: 9,
@@ -97,7 +98,7 @@ test('CI snapshot preserves source and raw Check Run semantics', async () => {
           },
         };
       }
-      if (path.endsWith('/status')) {
+      if (path.endsWith('/status?per_page=100')) {
         return {
           data: {
             statuses: [

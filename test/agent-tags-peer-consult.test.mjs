@@ -165,11 +165,11 @@ function fakeClient({ failReviews = false } = {}) {
     async request(method, path, options = {}) {
       calls.push({ method, path, options });
       if (method === 'GET' && /\/pulls\/1$/.test(path)) return { data: pullRequest() };
-      if (method === 'GET' && path.includes('/check-runs?check_name=')) return { data: { check_runs: [] } };
+      if (method === 'GET' && path.includes('/check-runs?check_name=')) return { data: { check_runs: [], total_count: 0 } };
       if (method === 'POST' && path.endsWith('/check-runs')) return { data: { id: ++checkId, ...options.body } };
       if (method === 'PATCH' && path.includes('/check-runs/')) return { data: { id: Number(path.split('/').at(-1)), ...options.body } };
-      if (method === 'GET' && path.includes('/check-runs?filter=latest')) return { data: { check_runs: [] } };
-      if (method === 'GET' && path.endsWith('/status')) return { data: { statuses: [] } };
+      if (method === 'GET' && path.includes('/check-runs?filter=latest')) return { data: { check_runs: [], total_count: 0 } };
+      if (method === 'GET' && path.endsWith('/status?per_page=100')) return { data: { statuses: [] } };
       if (method === 'POST' && path.endsWith('/reviews')) {
         if (failReviews) throw Object.assign(new Error('review rejected'), { status: 502 });
         return { data: { id: 1 } };

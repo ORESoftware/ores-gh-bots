@@ -244,11 +244,25 @@ export async function getCiSnapshot(client, token, owner, repo, headSha) {
   // preserve one newest run per (context, App) locally so a foreign same-name
   // App cannot shadow the expected App's evidence during admission.
   const checksResponse = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/check-runs?filter=latest&per_page=100`, { token });
-  const statusesResponse = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/status`, { token });
+  const statusesResponse = await client.request('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${headSha}/status?per_page=100`, { token });
+
+  // Do not decide merge eligibility from a truncated first page. Missing
+  // count/array metadata or a full 100-item page is ambiguous: fail closed
+  // rather than silently ignoring a failed workflow/status on the next page.
+  const checkRuns = checksResponse.data?.check_runs;
+  const checkTotal = checksResponse.data?.total_count;
+  const commitStatuses = statusesResponse.data?.statuses;
+  if (!Array.isArray(checkRuns) || !Number.isSafeInteger(checkTotal)
+      || checkTotal < 0 || checkTotal !== checkRuns.length || checkRuns.length >= 100) {
+    throw new Error('CI check-run snapshot incomplete or exceeds the bounded first page');
+  }
+  if (!Array.isArray(commitStatuses) || commitStatuses.length >= 100) {
+    throw new Error('CI commit-status snapshot incomplete or exceeds the bounded first page');
+  }
 
   const checks = new Map();
   const checkContexts = new Set();
-  for (const check of checksResponse.data.check_runs ?? []) {
+  for (const check of checkRuns) {
     if (OWN_CHECK_NAMES.has(check.name)) continue;
     const appId = check.app?.id ?? null;
     const key = `${check.name}\u0000${appId ?? 'none'}`;
@@ -267,7 +281,7 @@ export async function getCiSnapshot(client, token, owner, repo, headSha) {
   }
 
   const statuses = new Map();
-  for (const status of statusesResponse.data.statuses ?? []) {
+  for (const status of commitStatuses) {
     if (OWN_CHECK_NAMES.has(status.context) || checkContexts.has(status.context)) continue;
     const current = statuses.get(status.context);
     if (!current || status.id > current.id) statuses.set(status.context, {

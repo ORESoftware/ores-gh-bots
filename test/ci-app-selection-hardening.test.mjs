@@ -24,9 +24,9 @@ test('CI snapshot retains same-name Check Runs from different Apps', async () =>
     async request(method, path) {
       assert.equal(method, 'GET');
       if (path.includes('/check-runs?')) {
-        return { data: { check_runs: [check({ id: 10, appId: 42 }), check({ id: 20, appId: 99 })] } };
+        return { data: { check_runs: [check({ id: 10, appId: 42 }), check({ id: 20, appId: 99 })], total_count: 2 } };
       }
-      if (path.endsWith('/status')) return { data: { statuses: [] } };
+      if (path.endsWith('/status?per_page=100')) return { data: { statuses: [] } };
       throw new Error(`unexpected path ${path}`);
     },
   };
